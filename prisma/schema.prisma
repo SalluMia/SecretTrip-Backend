@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String            @id @default(uuid())
+  email            String            @unique
+  password         String?
+  displayName      String
+  profilePhotoUrl  String?
+  provider         String
+  googleId         String?           @unique // ✅ added this
+  role             Role              @default(USER) // ✅ added role
+  tripsJoined      Trip[]            @relation("TripMembers")
+  assignedMissions AssignedMission[]
+  payments         Payment[]
+  createdTrips     Trip[]            @relation("CreatedTrips")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model Trip {
+  id               String            @id @default(uuid())
+  name             String
+  theme            String
+  code             String            @unique
+  startDate        DateTime
+  endDate          DateTime
+  status           String
+  creatorId        String
+  creator          User              @relation("CreatedTrips", fields: [creatorId], references: [id]) // ✅ FIX
+  members          User[]            @relation("TripMembers")
+  assignedMissions AssignedMission[]
+  album            Album?
+  payments         Payment[] // ✅ FIX
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model MissionTemplate {
+  id             String  @id @default(uuid())
+  title          String
+  instruction    String
+  category       String // "aesthetic" or "agent"
+  sampleImageUrl String?
+}
+
+model AssignedMission {
+  id             String    @id @default(uuid())
+  userId         String
+  tripId         String
+  title          String
+  instruction    String
+  category       String
+  sampleImageUrl String?
+  photoUrl       String?
+  completed      Boolean   @default(false)
+  submittedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+  trip Trip @relation(fields: [tripId], references: [id])
+}
+
+model Album {
+  id        String   @id @default(uuid())
+  tripId    String   @unique
+  pdfUrl    String
+  pdfHDUrl  String?
+  printed   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id])
+}
+
+model Payment {
+  id        String   @id @default(uuid())
+  userId    String
+  tripId    String
+  type      String // "album_hd" | "album_print"
+  amount    Int
+  status    String // "paid", "pending", "failed"
+  timestamp DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  trip Trip @relation(fields: [tripId], references: [id])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
