@@ -45,7 +45,7 @@ app.get('/', async (req, res) => {
     });
   }
 });
-
+//routes
 app.use('/api', routes);
 app.use(errorHandler);
 
