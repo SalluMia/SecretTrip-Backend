@@ -20,7 +20,7 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
-// Health Check Route
+// Health Check Route EndPoint
 app.get('/', async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`; 
