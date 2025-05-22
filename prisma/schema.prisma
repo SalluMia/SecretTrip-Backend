@@ -14,8 +14,12 @@ model User {
   displayName      String
   profilePhotoUrl  String?
   provider         String
-  googleId         String?           @unique // ✅ added this
-  role             Role              @default(USER) // ✅ added role
+  googleId         String?           @unique
+  role             Role              @default(USER)
+  isEmailVerified  Boolean           @default(false) // ✅ New field
+  emailVerificationToken String?     // ✅ New field
+  passwordResetToken String?         // ✅ New field
+  passwordResetExpires DateTime?     // ✅ New field
   tripsJoined      Trip[]            @relation("TripMembers")
   assignedMissions AssignedMission[]
   payments         Payment[]
@@ -33,11 +37,11 @@ model Trip {
   endDate          DateTime
   status           String
   creatorId        String
-  creator          User              @relation("CreatedTrips", fields: [creatorId], references: [id]) // ✅ FIX
+  creator          User              @relation("CreatedTrips", fields: [creatorId], references: [id])
   members          User[]            @relation("TripMembers")
   assignedMissions AssignedMission[]
   album            Album?
-  payments         Payment[] // ✅ FIX
+  payments         Payment[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 }
@@ -46,7 +50,7 @@ model MissionTemplate {
   id             String  @id @default(uuid())
   title          String
   instruction    String
-  category       String // "aesthetic" or "agent"
+  category       String
   sampleImageUrl String?
 }
 
@@ -81,9 +85,9 @@ model Payment {
   id        String   @id @default(uuid())
   userId    String
   tripId    String
-  type      String // "album_hd" | "album_print"
+  type      String
   amount    Int
-  status    String // "paid", "pending", "failed"
+  status    String
   timestamp DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])

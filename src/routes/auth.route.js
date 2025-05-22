@@ -1,15 +1,17 @@
 const express = require('express');
 const passport = require('passport');
-const { signup, login } = require('../controllers/auth.controller');
+const { signup, login, verifyOTP, resendOTP, forgotPassword, verifyResetToken, resetPassword } = require('../controllers/auth.controller');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
 
 router.post('/signup', signup);
 router.post('/login', login);
-
-// Google OAuth
+router.post('/verify-otp', verifyOTP);
+router.post('/resend-otp', resendOTP);
+router.post('/forgot-password', forgotPassword);
+router.get('/verify-reset-token/:token', verifyResetToken);
+router.post('/reset-password', resetPassword);
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-
 router.get(
   '/google/callback',
   passport.authenticate('google', { failureRedirect: '/login' }),
