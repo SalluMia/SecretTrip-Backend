@@ -24,14 +24,9 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      # ✅ Removed build step as it's not needed for backend
-      # - name: Build
-      #   run: npm run build
-
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: secrettripe-server
-          slot-name: production
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
           package: .
