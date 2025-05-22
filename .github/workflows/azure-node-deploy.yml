@@ -1,4 +1,4 @@
-name: Build and Deploy Node.js app to Azure
+name: Deploy Node.js app to Azure
 
 on:
   push:
@@ -24,12 +24,14 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      - name: Build (if needed)
-        run: npm run build # remove if not needed
+      # ✅ Removed build step as it's not needed for backend
+      # - name: Build
+      #   run: npm run build
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: YOUR_AZURE_APP_NAME
+          app-name: secrettripe-server
           slot-name: production
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
+          package: .
