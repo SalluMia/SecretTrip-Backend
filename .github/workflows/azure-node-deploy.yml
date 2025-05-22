@@ -24,6 +24,11 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
