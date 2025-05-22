@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node src/app.js",
-    "dev": "nodemon src/app.js"
-  },
+"scripts": {
+  "test": "echo \"Error: no test specified\" && exit 1",
+  "prisma:generate": "npx prisma generate",
+  "start": "npm run prisma:generate && node src/app.js",
+  "dev": "npm run prisma:generate && nodemon src/app.js"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
