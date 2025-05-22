@@ -7,10 +7,10 @@
     "node": ">=20.0.0",
     "npm": ">=9.0.0"
   },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+   "scripts": {
     "start": "node src/app.js",
-    "dev": "npm run prisma:generate && nodemon src/app.js"
+    "dev": "npm run prisma:generate && nodemon src/app.js",
+    "prisma:generate": "npx prisma generate"
   },
   "keywords": [],
   "author": "",
