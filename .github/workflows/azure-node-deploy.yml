@@ -36,4 +36,3 @@ jobs:
           app-name: secrettripe-server
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
           package: .
-          clean: true

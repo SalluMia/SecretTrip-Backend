@@ -8,9 +8,9 @@
     "npm": ">=9.0.0"
   },
    "scripts": {
+    "postinstall": "prisma generate",
     "start": "node src/app.js",
-    "dev": "npm run prisma:generate && nodemon src/app.js",
-    "prisma:generate": "npx prisma generate"
+    "dev": "npm run prisma:generate && nodemon src/app.js"
   },
   "keywords": [],
   "author": "",
