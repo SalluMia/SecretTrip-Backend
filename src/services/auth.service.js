@@ -1,8 +1,8 @@
 const { prisma } = require('../config/prisma');
 const bcrypt = require('bcryptjs');
-const jwt = require('../utils/jwt');
 const { generateOTP, sendOTPEmail, sendPasswordResetEmail } = require('../utils/email');
 const crypto = require('crypto');
+const { sign } = require('../utils/jwt');
 
 // Step 1: Initial signup (creates user but unverified)
 exports.signup = async ({ email, password, displayName }) => {
@@ -71,7 +71,7 @@ exports.verifyOTP = async ({ email, otp }) => {
     }
   });
 
-  const token = jwt.sign({ id: updatedUser.id });
+  const token = sign({ id: updatedUser.id });
 
   return { 
     user: updatedUser, 
@@ -121,7 +121,7 @@ exports.login = async ({ email, password }) => {
     throw new Error('Invalid credentials');
   }
 
-  const token = jwt.sign({ id: user.id });
+  const token = sign({ id: user.id });
   
   const userResponse = {
     id: user.id,

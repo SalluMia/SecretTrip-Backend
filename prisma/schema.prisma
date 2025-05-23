@@ -16,10 +16,15 @@ model User {
   provider         String
   googleId         String?           @unique
   role             Role              @default(USER)
-  isEmailVerified  Boolean           @default(false) // ✅ New field
-  emailVerificationToken String?     // ✅ New field
-  passwordResetToken String?         // ✅ New field
-  passwordResetExpires DateTime?     // ✅ New field
+  isEmailVerified  Boolean           @default(false)
+  emailVerificationToken String?
+  passwordResetToken String?
+  passwordResetExpires DateTime?
+  
+  // Profile completion fields
+  isProfileCompleted Boolean         @default(false)
+  travelInterests    String[]        @default([]) // Array of interest strings
+  
   tripsJoined      Trip[]            @relation("TripMembers")
   assignedMissions AssignedMission[]
   payments         Payment[]

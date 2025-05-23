@@ -1,6 +1,7 @@
 const express = require('express');
 const dotenv = require('dotenv');
-const cors = require('cors'); // ✅ import CORS
+const cors = require('cors');
+const path = require('path');
 const routes = require('./routes');
 const session = require('express-session');
 const passport = require('passport');
@@ -12,20 +13,27 @@ dotenv.config();
 
 const app = express();
 
-// ✅ Add this BEFORE any route or middleware
+// CORS configuration
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5174',
-  credentials: true, // If you're using cookies
+  credentials: true,
 }));
 
+// Body parsing middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
+// Static files serving - IMPORTANT: Add this for file uploads
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Session configuration
 app.use(session({
   secret: process.env.SESSION_SECRET || 'secret',
   resave: false,
   saveUninitialized: true,
 }));
 
+// Passport middleware
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -45,13 +53,18 @@ app.get('/', async (req, res) => {
     });
   }
 });
-//routes
+
+// API routes
 app.use('/api', routes);
+
+// Error handling middleware
 app.use(errorHandler);
 
+// Database connection and server start
 connectDB().then(() => {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     pinoLogger.info(`🚀 Server started on port ${PORT}`);
+    pinoLogger.info(`📁 Static files served from: ${path.join(__dirname, 'uploads')}`);
   });
 });
