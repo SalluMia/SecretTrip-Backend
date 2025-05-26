@@ -7,53 +7,68 @@ const session = require('express-session');
 const passport = require('passport');
 const errorHandler = require('./middlewares/errorHandler');
 const { pinoLogger } = require('./config/logger');
-const { prisma, connectDB } = require('./config/prisma'); 
+const { prisma, connectDB } = require('./config/prisma');
 require('./config/passport');
+
 dotenv.config();
 
 const app = express();
 
-// CORS configuration
+// ✅ Allowed origins list
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'http://localhost:5174',
   'http://localhost:65028',
 ];
 
-app.use(cors({
+// ✅ CORS setup
+const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+    if (!origin) {
+      // Allow requests like Postman or curl
+      return callback(null, true);
     }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // Optional wildcard fallback (no credentials in this case)
+    if (origin === '*') {
+      return callback(null, true);
+    }
+
+    console.warn(`❌ CORS blocked origin: ${origin}`);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
-}));
+  exposedHeaders: ['Content-Disposition'], // for file downloads
+};
 
+app.use(cors(corsOptions));
 
-// Body parsing middleware
+// ✅ Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Static files serving - IMPORTANT: Add this for file uploads
+// ✅ Static file serving for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Session configuration
+// ✅ Session setup
 app.use(session({
   secret: process.env.SESSION_SECRET || 'secret',
   resave: false,
   saveUninitialized: true,
 }));
 
-// Passport middleware
+// ✅ Passport setup
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Health Check
+// ✅ Health check
 app.get('/', async (req, res) => {
   try {
-    await prisma.$queryRaw`SELECT 1`; 
+    await prisma.$queryRaw`SELECT 1`;
     res.status(200).json({
       success: true,
       message: 'Server is running and database is connected',
@@ -67,13 +82,13 @@ app.get('/', async (req, res) => {
   }
 });
 
-// API routes
+// ✅ API routes
 app.use('/api', routes);
 
-// Error handling middleware
+// ✅ Error handling middleware
 app.use(errorHandler);
 
-// Database connection and server start
+// ✅ DB connect + server start
 connectDB().then(() => {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
