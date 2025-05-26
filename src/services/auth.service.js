@@ -121,7 +121,7 @@ exports.login = async ({ email, password }) => {
     throw new Error('Invalid credentials');
   }
 
-  const token = sign({ id: user.id });
+  const token = sign({ id: user.id, role: user.role });
   
   const userResponse = {
     id: user.id,

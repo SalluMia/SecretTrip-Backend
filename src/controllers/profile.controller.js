@@ -1,4 +1,4 @@
-// controllers/profile.controller.js
+const { prisma } = require('../config/prisma');
 const profileService = require('../services/profile.service');
 const { successResponse, errorResponse } = require('../utils/response');
 
@@ -79,7 +79,7 @@ exports.updateProfile = async (req, res, next) => {
 // Get available travel interests
 exports.getTravelInterests = async (req, res, next) => {
   try {
-    const data = await profileService.getTravelInterests();
+    const data = await prisma.travelInterest.findMany({ orderBy: { name: 'asc' } });
     successResponse(res, 200, 'Travel interests retrieved successfully', data);
   } catch (err) {
     next(err);
