@@ -9,14 +9,19 @@ exports.completeProfile = async (req, res, next) => {
     const { travelInterests } = req.body;
     console.log('photo', req.file)
     // Parse travel interests if sent as string
-    let parsedInterests;
-    try {
-      parsedInterests = typeof travelInterests === 'string' 
-        ? JSON.parse(travelInterests) 
-        : travelInterests;
-    } catch (parseError) {
-      return errorResponse(res, 400, 'Invalid travel interests format');
-    }
+      let parsedInterests;
+      try {
+        parsedInterests = typeof travelInterests === 'string'
+          ? JSON.parse(travelInterests)
+          : travelInterests;
+      } catch {
+        return errorResponse(res, 400, 'Invalid travel interests format');
+      }
+
+      if (!Array.isArray(parsedInterests)) {
+        return errorResponse(res, 400, 'travelInterests must be an array of IDs');
+      }
+
 
     const profilePhotoPath = req.file ? req.file.path : null;
    

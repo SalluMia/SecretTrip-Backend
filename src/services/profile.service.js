@@ -24,8 +24,7 @@ const AVAILABLE_INTERESTS = [
 
 // Complete user profile
 exports.completeProfile = async ({ userId, travelInterests, profilePhotoPath }) => {
-  // Validate travel interests
-  if (!travelInterests || !Array.isArray(travelInterests) || travelInterests.length === 0) {
+  if (!Array.isArray(travelInterests) || travelInterests.length === 0) {
     throw new Error('Please select at least one travel interest');
   }
 
@@ -33,46 +32,37 @@ exports.completeProfile = async ({ userId, travelInterests, profilePhotoPath }) 
     throw new Error('Maximum 5 travel interests allowed');
   }
 
-  // Validate interests against available options
-  const invalidInterests = travelInterests.filter(interest => !AVAILABLE_INTERESTS.includes(interest));
-  if (invalidInterests.length > 0) {
-    throw new Error(`Invalid travel interests: ${invalidInterests.join(', ')}`);
-  }
-
-  // Check if user exists
-  const existingUser = await prisma.user.findUnique({ 
-    where: { id: userId },
-    select: { id: true, profilePhotoUrl: true, isProfileCompleted: true }
+  // Validate IDs from DB
+  const interests = await prisma.travelInterest.findMany({
+    where: { id: { in: travelInterests } }
   });
 
-  if (!existingUser) {
-    throw new Error('User not found');
+  if (interests.length !== travelInterests.length) {
+    throw new Error('One or more selected interests are invalid');
   }
 
-  // If user already has a profile photo and a new one is uploaded, delete the old one
-  if (existingUser.profilePhotoUrl && profilePhotoPath) {
-    const oldPhotoPath = path.join(__dirname, '../uploads/profile-photos', path.basename(existingUser.profilePhotoUrl));
-    if (fs.existsSync(oldPhotoPath)) {
-      try {
-        fs.unlinkSync(oldPhotoPath);
-      } catch (error) {
-        console.error('Error deleting old profile photo:', error);
-      }
-    }
+  // Optional: delete old profile photo
+  const existingUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { profilePhotoUrl: true }
+  });
+
+  if (existingUser?.profilePhotoUrl && profilePhotoPath) {
+    const oldPath = path.join(__dirname, '../uploads/profile-photos', path.basename(existingUser.profilePhotoUrl));
+    if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
   }
 
-  // Prepare update data
   const updateData = {
-    travelInterests,
-    isProfileCompleted: true
+    isProfileCompleted: true,
+    interests: {
+      set: travelInterests.map(id => ({ id })) // ✅ link to dynamic table
+    }
   };
 
-  // Add profile photo URL if uploaded
   if (profilePhotoPath) {
     updateData.profilePhotoUrl = `/uploads/profile-photos/${path.basename(profilePhotoPath)}`;
   }
 
-  // Update user profile
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: updateData,
@@ -81,33 +71,34 @@ exports.completeProfile = async ({ userId, travelInterests, profilePhotoPath }) 
       email: true,
       displayName: true,
       profilePhotoUrl: true,
-      travelInterests: true,
       isProfileCompleted: true,
-      role: true
+      role: true,
+      interests: true
     }
   });
 
-  return {
-    user: updatedUser,
-    message: 'Profile completed successfully'
-  };
+  return { user: updatedUser, message: 'Profile completed successfully' };
 };
+
 
 // Get user profile
 exports.getUserProfile = async ({ userId }) => {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      email: true,
-      displayName: true,
-      profilePhotoUrl: true,
-      travelInterests: true,
-      isProfileCompleted: true,
-      role: true,
-      createdAt: true
+ const user = await prisma.user.findUnique({
+  where: { id: userId },
+  select: {
+    id: true,
+    email: true,
+    displayName: true,
+    profilePhotoUrl: true,
+    isProfileCompleted: true,
+    role: true,
+    createdAt: true,
+    interests: {
+      select: { id: true, name: true }
     }
-  });
+  }
+});
+
 
   if (!user) {
     throw new Error('User not found');

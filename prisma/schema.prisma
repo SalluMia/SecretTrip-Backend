@@ -22,7 +22,7 @@ model User {
   passwordResetExpires DateTime?
 
   isProfileCompleted Boolean         @default(false)
-  travelInterests    String[]        @default([])
+   interests TravelInterest[] @relation("UserInterests")
 
   tripsJoined      Trip[]            @relation("TripMembers")
   assignedMissions AssignedMission[]
@@ -105,10 +105,12 @@ model Payment {
 }
 
 model TravelInterest {
-  id    String  @id @default(uuid())
-  name  String  @unique
+  id        String @id @default(uuid())
+  name      String @unique
   createdAt DateTime @default(now())
+  users     User[] @relation("UserInterests")
 }
+
 model JoinRequest {
   id        String   @id @default(uuid())
   tripId    String
