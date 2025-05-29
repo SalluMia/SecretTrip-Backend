@@ -8,32 +8,32 @@ datasource db {
 }
 
 model User {
-  id               String            @id @default(uuid())
-  email            String            @unique
-  password         String?
-  displayName      String
-  profilePhotoUrl  String?
-  provider         String
-  googleId         String?           @unique
-  role             Role              @default(USER)
-  isEmailVerified  Boolean           @default(false)
+  id                     String    @id @default(uuid())
+  email                  String    @unique
+  password               String?
+  displayName            String
+  profilePhotoUrl        String?
+  provider               String
+  googleId               String?   @unique
+  role                   Role      @default(USER)
+  isEmailVerified        Boolean   @default(false)
   emailVerificationToken String?
-  passwordResetToken String?
-  passwordResetExpires DateTime?
+  passwordResetToken     String?
+  passwordResetExpires   DateTime?
 
-  isProfileCompleted Boolean         @default(false)
-   interests TravelInterest[] @relation("UserInterests")
+  isProfileCompleted Boolean          @default(false)
+  interests          TravelInterest[] @relation("UserInterests")
 
   tripsJoined      Trip[]            @relation("TripMembers")
   assignedMissions AssignedMission[]
   payments         Payment[]
   createdTrips     Trip[]            @relation("CreatedTrips")
-  joinRequests     JoinRequest[]    
+  joinRequests     JoinRequest[]
+  tripAliases      TripAlias[]
 
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
-
 
 model Trip {
   id               String            @id @default(uuid())
@@ -42,19 +42,33 @@ model Trip {
   code             String            @unique
   startDate        DateTime
   endDate          DateTime
-  status           String
+  status           String            @default("upcoming")
   creatorId        String
   creator          User              @relation("CreatedTrips", fields: [creatorId], references: [id])
   members          User[]            @relation("TripMembers")
   assignedMissions AssignedMission[]
   album            Album?
   payments         Payment[]
-  joinRequests     JoinRequest[]     
+  joinRequests     JoinRequest[]
+  tripMode         String            @default("normal") // normal | fun
+  tripAliases      TripAlias[]
 
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
+model TripAlias {
+  id     String @id @default(uuid())
+  userId String
+  tripId String
+  alias  String
+
+  user User @relation(fields: [userId], references: [id])
+  trip Trip @relation(fields: [tripId], references: [id])
+
+  @@unique([tripId, alias])
+  @@unique([tripId, userId])
+}
 
 model MissionTemplate {
   id             String  @id @default(uuid())
@@ -75,10 +89,11 @@ model AssignedMission {
   photoUrl       String?
   completed      Boolean   @default(false)
   submittedAt    DateTime?
-
+  createdAt      DateTime  @default(now())
   user User @relation(fields: [userId], references: [id])
   trip Trip @relation(fields: [tripId], references: [id])
 }
+
 
 model Album {
   id        String   @id @default(uuid())
@@ -105,10 +120,10 @@ model Payment {
 }
 
 model TravelInterest {
-  id        String @id @default(uuid())
-  name      String @unique
+  id        String   @id @default(uuid())
+  name      String   @unique
   createdAt DateTime @default(now())
-  users     User[] @relation("UserInterests")
+  users     User[]   @relation("UserInterests")
 }
 
 model JoinRequest {

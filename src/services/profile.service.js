@@ -118,13 +118,13 @@ exports.updateProfile = async ({ userId, displayName, travelInterests, profilePh
     throw new Error('User not found');
   }
 
-  // Prepare update data
   const updateData = {};
 
   if (displayName) {
     updateData.displayName = displayName;
   }
 
+  // ✅ Handle dynamic interests
   if (travelInterests) {
     if (!Array.isArray(travelInterests) || travelInterests.length === 0) {
       throw new Error('Please select at least one travel interest');
@@ -134,27 +134,32 @@ exports.updateProfile = async ({ userId, displayName, travelInterests, profilePh
       throw new Error('Maximum 5 travel interests allowed');
     }
 
-    const invalidInterests = travelInterests.filter(interest => !AVAILABLE_INTERESTS.includes(interest));
-    if (invalidInterests.length > 0) {
-      throw new Error(`Invalid travel interests: ${invalidInterests.join(', ')}`);
+    const validInterests = await prisma.travelInterest.findMany({
+      where: { id: { in: travelInterests } }
+    });
+
+    if (validInterests.length !== travelInterests.length) {
+      throw new Error('One or more travel interests are invalid');
     }
 
-    updateData.travelInterests = travelInterests;
+    updateData.interests = {
+      set: travelInterests.map(id => ({ id }))
+    };
   }
 
-  // Handle profile photo update
+  // ✅ Handle profile photo update
   if (profilePhotoPath) {
-    // Delete old photo if exists
     if (existingUser.profilePhotoUrl) {
-      const oldPhotoPath = path.join(__dirname, '../uploads/profile-photos', path.basename(existingUser.profilePhotoUrl));
-      if (fs.existsSync(oldPhotoPath)) {
+      const oldPath = path.join(__dirname, '../uploads/profile-photos', path.basename(existingUser.profilePhotoUrl));
+      if (fs.existsSync(oldPath)) {
         try {
-          fs.unlinkSync(oldPhotoPath);
-        } catch (error) {
-          console.error('Error deleting old profile photo:', error);
+          fs.unlinkSync(oldPath);
+        } catch (err) {
+          console.error('Error deleting old photo:', err);
         }
       }
     }
+
     updateData.profilePhotoUrl = `/uploads/profile-photos/${path.basename(profilePhotoPath)}`;
   }
 
@@ -166,9 +171,11 @@ exports.updateProfile = async ({ userId, displayName, travelInterests, profilePh
       email: true,
       displayName: true,
       profilePhotoUrl: true,
-      travelInterests: true,
       isProfileCompleted: true,
-      role: true
+      role: true,
+      interests: {
+        select: { id: true, name: true }
+      }
     }
   });
 
@@ -177,6 +184,7 @@ exports.updateProfile = async ({ userId, displayName, travelInterests, profilePh
     message: 'Profile updated successfully'
   };
 };
+
 
 // Get available travel interests
 exports.getTravelInterests = async () => {
