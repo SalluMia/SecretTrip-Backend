@@ -13,7 +13,7 @@ exports.createTrip = async ({ userId, name, theme, startDate, endDate, alias, tr
       theme,
       startDate: new Date(startDate),
       endDate: new Date(endDate),
-      status: 'upcoming',
+      status: 'UPCOMING',
       code,
       creatorId: userId,
       tripMode,
@@ -168,7 +168,7 @@ exports.activateTrip = async ({ tripId, creatorId }) => {
 
   return await prisma.trip.update({
     where: { id: tripId },
-    data: { status: 'active' }
+    data: { status: 'ACTIVE' }
   });
 };
 
@@ -224,9 +224,9 @@ exports.submitMissionPhoto = async ({ missionId, userId, photoUrl }) => {
 // ✅ Get filtered trips by status (upcoming, active, completed)
 exports.getTripsByStatus = async ({ userId, status }) => {
   const mappedStatus = {
-    upcoming: 'upcoming',
-    active: 'active',
-    completed: 'completed'
+    upcoming: 'UPCOMING',
+    active: 'ACTIVE',
+    completed: 'COMPLETED'
   }[status];
 
   const trips = await prisma.trip.findMany({
@@ -309,7 +309,7 @@ exports.getTripAlbumPreview = async ({ userId, tripId }) => {
     where: {
       id: tripId,
       members: { some: { id: userId } },
-      status: 'completed'
+      status: 'COMPLETED'
     },
     include: {
       album: true,

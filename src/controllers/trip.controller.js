@@ -142,7 +142,7 @@ exports.getTripsByStatus = async (req, res, next) => {
     const userId = req.user.id;
     const { status } = req.query;
 
-    if (!['active', 'upcoming', 'completed'].includes(status)) {
+    if (!['ACTIVE', 'UPCOMING', 'COMPLETED'].includes(status)) {
       return errorResponse(res, 400, 'Invalid status. Must be one of: active, upcoming, completed');
     }
 
@@ -178,6 +178,3 @@ exports.getTripAlbumPreview = async (req, res, next) => {
     next(err);
   }
 };
-
-
-

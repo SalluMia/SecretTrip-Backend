@@ -24,6 +24,7 @@ model User {
   isProfileCompleted Boolean          @default(false)
   interests          TravelInterest[] @relation("UserInterests")
 
+  status UserStatus @default(ACTIVE)
   tripsJoined      Trip[]            @relation("TripMembers")
   assignedMissions AssignedMission[]
   payments         Payment[]
@@ -42,7 +43,7 @@ model Trip {
   code             String            @unique
   startDate        DateTime
   endDate          DateTime
-  status           String            @default("upcoming")
+  status TripStatus @default(UPCOMING)
   creatorId        String
   creator          User              @relation("CreatedTrips", fields: [creatorId], references: [id])
   members          User[]            @relation("TripMembers")
@@ -76,6 +77,8 @@ model MissionTemplate {
   instruction    String
   category       String
   sampleImageUrl String?
+  type MissionType
+  level MissionLevel @default(NORMAL)
 }
 
 model AssignedMission {
@@ -139,8 +142,53 @@ model JoinRequest {
 
   @@unique([tripId, userId])
 }
+model Package {
+  id        String   @id @default(uuid())
+  name      String
+  price     Float
+  features  String[] // store as a string array
+  status    PackageStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PrivacyPolicy {
+  id        String   @id @default(uuid())
+  language  String   // 'en' for English, 'fr' for French, etc.
+  content   String   // The actual privacy policy content
+  version   String   @default("1.0") // Version tracking
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("privacy_policies")
+}
+
 
 enum Role {
   USER
   ADMIN
+}
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum TripStatus {
+  UPCOMING
+  ACTIVE
+  COMPLETED
+}
+
+enum MissionType {
+  AESTHETIC
+  SECRET_AGENT
+}
+
+enum MissionLevel {
+  NORMAL
+  CRITICAL
+}
+enum PackageStatus {
+  ACTIVE
+  INACTIVE
 }

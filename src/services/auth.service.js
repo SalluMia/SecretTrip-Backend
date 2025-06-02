@@ -112,6 +112,10 @@ exports.login = async ({ email, password }) => {
     throw new Error('User not found');
   }
 
+  if (user.status === 'BLOCKED') {
+    throw new Error('Your account has been blocked by admin.');
+  }
+
   if (!user.isEmailVerified) {
     throw new Error('Please verify your email first');
   }
