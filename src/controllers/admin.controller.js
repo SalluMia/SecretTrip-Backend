@@ -176,17 +176,17 @@ exports.getAllMissionTemplates = async (req, res, next) => {
     // Group data for response
     const response = {
       all: data,
-      aesthetic: data.filter(m => m.type === 'AESTHETIC'),
-      secretAgent: data.filter(m => m.type === 'SECRET_AGENT'),
-      normal: data.filter(m => m.level === 'NORMAL'),
-      critical: data.filter(m => m.level === 'CRITICAL'),
-      stats: {
-        total: data.length,
-        aesthetic: data.filter(m => m.type === 'AESTHETIC').length,
-        secretAgent: data.filter(m => m.type === 'SECRET_AGENT').length,
-        normal: data.filter(m => m.level === 'NORMAL').length,
-        critical: data.filter(m => m.level === 'CRITICAL').length
-      }
+      // aesthetic: data.filter(m => m.type === 'AESTHETIC'),
+      // secretAgent: data.filter(m => m.type === 'SECRET_AGENT'),
+      // normal: data.filter(m => m.level === 'NORMAL'),
+      // critical: data.filter(m => m.level === 'CRITICAL'),
+      // stats: {
+      //   total: data.length,
+      //   aesthetic: data.filter(m => m.type === 'AESTHETIC').length,
+      //   secretAgent: data.filter(m => m.type === 'SECRET_AGENT').length,
+      //   normal: data.filter(m => m.level === 'NORMAL').length,
+      //   critical: data.filter(m => m.level === 'CRITICAL').length
+      // }
     };
     
     successResponse(res, 200, 'Mission templates fetched successfully', response);
