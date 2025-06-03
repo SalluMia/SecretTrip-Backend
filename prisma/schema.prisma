@@ -75,9 +75,9 @@ model MissionTemplate {
   id             String  @id @default(uuid())
   title          String
   instruction    String
-  category       String
+  location       String?
   sampleImageUrl String?
-  type MissionType
+  type MissionType   // this is actually category so its ok as type dont change 
   level MissionLevel @default(NORMAL)
 }
 

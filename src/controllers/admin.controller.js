@@ -134,10 +134,10 @@ exports.togglePackageStatus = async (req, res, next) => {
 
 exports.createMissionTemplate = async (req, res, next) => {
   try {
-    const { title, instruction, category, type, level } = req.body;
+    const { title, instruction, location, type, level } = req.body;
     
     // Validation
-    if (!title || !instruction || !category || !type) {
+    if (!title || !instruction || !location || !type) {
       return errorResponse(res, 400, 'Title, instruction, category, and type are required');
     }
     
@@ -152,7 +152,7 @@ exports.createMissionTemplate = async (req, res, next) => {
     const data = await adminService.createMissionTemplate({
       title,
       instruction,
-      category,
+      location,
       type,
       level: level || 'NORMAL'
     });
@@ -213,7 +213,7 @@ exports.getMissionTemplateById = async (req, res, next) => {
 exports.updateMissionTemplate = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { title, instruction, category, type, level } = req.body;
+    const { title, instruction, location, type, level } = req.body;
     
     // Validation
     if (type && !['AESTHETIC', 'SECRET_AGENT'].includes(type)) {
@@ -227,7 +227,7 @@ exports.updateMissionTemplate = async (req, res, next) => {
     const data = await adminService.updateMissionTemplate(id, {
       title,
       instruction,
-      category,
+      location,
       type,
       level
     });

@@ -74,7 +74,7 @@ exports.getAdminDashboardStats = async () => {
         id: true,
         title: true,
         instruction: true,
-        category: true,
+        location: true,
         type: true,
         level: true
       }
@@ -319,7 +319,7 @@ exports.getFullTripDetail = async (tripId) => {
       id: m.id,
       title: m.title,
       instruction: m.instruction,
-      category: m.category,
+      location: m.location,
       photoUrl: m.photoUrl,
       completed: m.completed,
       submittedAt: m.submittedAt,
@@ -378,12 +378,12 @@ exports.togglePackageStatus = async (id, action) => {
 
 // ============== MISSION FUNCTIONS ==============
 
-exports.createMissionTemplate = async ({ title, instruction, category, type, level }) => {
+exports.createMissionTemplate = async ({ title, instruction, location, type, level }) => {
   return await prisma.missionTemplate.create({
     data: {
       title,
       instruction,
-      category,
+      location,
       type,
       level
     }
@@ -425,7 +425,7 @@ exports.getMissionTemplateById = async (id) => {
   });
 };
 
-exports.updateMissionTemplate = async (id, { title, instruction, category, type, level }) => {
+exports.updateMissionTemplate = async (id, { title, instruction, location, type, level }) => {
   const existing = await prisma.missionTemplate.findUnique({ where: { id } });
   if (!existing) throw new Error('Mission template not found');
   
@@ -434,7 +434,7 @@ exports.updateMissionTemplate = async (id, { title, instruction, category, type,
     data: {
       title,
       instruction,
-      category,
+      location,
       type,
       level
     }
