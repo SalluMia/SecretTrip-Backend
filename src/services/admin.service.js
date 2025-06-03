@@ -1,5 +1,159 @@
 const { prisma } = require('../config/prisma');
 
+
+
+// ============== ADMIN DASHBOARD STATS SERVICE FUNCTION ==============
+
+exports.getAdminDashboardStats = async () => {
+  try {
+    // Get basic counts
+    const [
+      totalUsers,
+      activeUsers,
+      blockedUsers,
+      totalTrips,
+      activeTrips,
+      upcomingTrips,
+      completedTrips,
+      totalMissions,
+      completedMissions,
+      totalMissionTemplates,
+      aestheticMissions,
+      secretAgentMissions
+    ] = await Promise.all([
+      // User stats
+      prisma.user.count(),
+      prisma.user.count({ where: { status: 'ACTIVE' } }),
+      prisma.user.count({ where: { status: 'BLOCKED' } }),
+      
+      // Trip stats
+      prisma.trip.count(),
+      prisma.trip.count({ where: { status: 'ACTIVE' } }),
+      prisma.trip.count({ where: { status: 'UPCOMING' } }),
+      prisma.trip.count({ where: { status: 'COMPLETED' } }),
+      
+      // Mission stats
+      prisma.assignedMission.count(),
+      prisma.assignedMission.count({ where: { completed: true } }),
+      
+      // Mission template stats
+      prisma.missionTemplate.count(),
+      prisma.missionTemplate.count({ where: { type: 'AESTHETIC' } }),
+      prisma.missionTemplate.count({ where: { type: 'SECRET_AGENT' } })
+    ]);
+
+    // Get recent users (last 5)
+    const recentUsers = await prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        displayName: true,
+        email: true,
+        status: true,
+        profilePhotoUrl: true,
+        createdAt: true
+      }
+    });
+
+    // Get recent trips (last 5)
+    const recentTrips = await prisma.trip.findMany({
+      orderBy: { startDate: 'desc' },
+      take: 5,
+      include: {
+        members: true,
+        album: true
+      }
+    });
+
+    // Get recent mission templates (last 5)
+    const recentMissionTemplates = await prisma.missionTemplate.findMany({
+      orderBy: { id: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        title: true,
+        instruction: true,
+        category: true,
+        type: true,
+        level: true
+      }
+    });
+
+    // Calculate inactive users
+    const inactiveUsers = totalUsers - activeUsers - blockedUsers;
+
+    // Format trips data
+    const formattedTrips = recentTrips.map(trip => ({
+      id: trip.id,
+      name: trip.name,
+      startDate: trip.startDate,
+      endDate: trip.endDate,
+      status: trip.status.toLowerCase(),
+      participants: trip.members.length,
+      hdVersion: trip.album?.pdfHDUrl ? 'completed' : 'upcoming'
+    }));
+
+    // Return structured dashboard data
+    return {
+      // Main dashboard cards
+      stats: {
+        activeUsers,
+        totalTrips,
+        totalMissions,
+        completedTrips
+      },
+      
+      // Pie chart data for Trip Status
+      tripStatus: {
+        completed: completedTrips,
+        active: activeTrips,
+        upcoming: upcomingTrips
+      },
+      
+      // Pie chart data for Mission Types
+      missionTypes: {
+        aesthetic: aestheticMissions,
+        secretAgent: secretAgentMissions
+      },
+      
+      // Pie chart data for User Activity
+      userActivity: {
+        active: activeUsers,
+        inactive: inactiveUsers,
+        blocked: blockedUsers
+      },
+      
+      // Lists for dashboard sections
+      users: recentUsers,
+      trips: formattedTrips,
+      missionTemplates: recentMissionTemplates,
+      
+      // Additional summary data
+      summary: {
+        totalUsers,
+        activeUsers,
+        blockedUsers,
+        inactiveUsers,
+        totalTrips,
+        activeTrips,
+        upcomingTrips,
+        completedTrips,
+        totalMissions,
+        completedMissions,
+        totalMissionTemplates,
+        aestheticMissions,
+        secretAgentMissions
+      }
+    };
+    
+  } catch (error) {
+    console.error('Error fetching admin dashboard stats:', error);
+    throw new Error('Failed to fetch dashboard statistics');
+  }
+};
+
+
 exports.toggleUserStatus = async (userId, action) => {
   const newStatus = action === 'block' ? 'BLOCKED' : 'ACTIVE';
   
@@ -79,7 +233,7 @@ exports.toggleUserStatus = async (userId, action) => {
     where: { id: userId }
   });
    console.log(existingUser)
-   
+
   if (!existingUser) {
     throw new Error(`User with ID ${userId} not found`);
   }
