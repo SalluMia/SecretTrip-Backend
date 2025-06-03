@@ -27,7 +27,7 @@ exports.toggleUserStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { action } = req.query;
-
+     console.log(action, req.query)
     if (!['block', 'unblock'].includes(action)) {
       return errorResponse(res, 400, 'Action must be either block or unblock');
     }

@@ -4,7 +4,7 @@ exports.getHomeData = async (userId) => {
   const activeTrip = await prisma.trip.findFirst({
     where: {
       members: { some: { id: userId } },
-      status: 'active'
+      status: 'ACTIVE'
     }
   });
 

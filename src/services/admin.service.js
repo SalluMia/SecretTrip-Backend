@@ -1,83 +1,33 @@
 const { prisma } = require('../config/prisma');
 
-exports.getAdminDashboardStats = async () => {
-  const [
-    activeUsers,
-    blockedUsers,
-    allTrips,
-    completedTrips,
-    activeTrips,
-    upcomingTrips,
-    allMissions,
-    aestheticMissions,
-    secretAgentMissions,
-    users,
-    trips,
-    missionTemplates
-  ] = await Promise.all([
-    prisma.user.count({ where: { status: 'ACTIVE' } }),
-    prisma.user.count({ where: { status: 'BLOCKED' } }),
-    prisma.trip.count(),
-    prisma.trip.count({ where: { status: 'COMPLETED' } }),
-    prisma.trip.count({ where: { status: 'ACTIVE' } }),
-    prisma.trip.count({ where: { status: 'UPCOMING' } }),
-    prisma.assignedMission.count(),
-    prisma.assignedMission.count({ where: { category: 'AESTHETIC' } }),
-    prisma.assignedMission.count({ where: { category: 'SECRET_AGENT' } }),
-    prisma.user.findMany({
-      take: 3,
-      select: {
-        id: true,
-        email: true,
-        displayName: true,
-        status: true
-      }
-    }),
-    prisma.trip.findMany({
-      take: 3,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        members: true
-      }
-    }),
-    prisma.missionTemplate.findMany({
-      take: 3
-    })
-  ]);
-
-  return {
-    overviewCards: {
-      activeUsers,
-      totalTrips: allTrips,
-      totalMissions: allMissions,
-      completedTrips
-    },
-    userStats: {
-      active: activeUsers,
-      blocked: blockedUsers
-    },
-    tripStats: {
-      total: allTrips,
-      active: activeTrips,
-      upcoming: upcomingTrips,
-      completed: completedTrips
-    },
-    missionStats: {
-      total: allMissions,
-      aesthetic: aestheticMissions,
-      secretAgent: secretAgentMissions
-    },
-    recentUsers: users,
-    recentTrips: trips.map(t => ({
-      id: t.id,
-      name: t.name,
-      startDate: t.startDate,
-      endDate: t.endDate,
-      status: t.status,
-      participants: t.members.length
-    })),
-    recentMissionTemplates: missionTemplates
-  };
+exports.toggleUserStatus = async (userId, action) => {
+  const newStatus = action === 'block' ? 'BLOCKED' : 'ACTIVE';
+  
+  // Validate UUID format (optional but recommended)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(userId)) {
+    throw new Error('Invalid userId format - must be a valid UUID');
+  }
+  
+  // First check if user exists
+  const existingUser = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+  
+  if (!existingUser) {
+    throw new Error(`User with ID ${userId} not found`);
+  }
+  
+  return await prisma.user.update({
+    where: { id: userId },
+    data: { status: newStatus },
+    select: {
+      id: true,
+      email: true,
+      displayName: true,
+      status: true
+    }
+  });
 };
 
 
@@ -120,6 +70,20 @@ exports.getAllUsers = async (filters = {}) => {
 
 exports.toggleUserStatus = async (userId, action) => {
   const newStatus = action === 'block' ? 'BLOCKED' : 'ACTIVE';
+  console.log(userId);
+  
+
+  
+  // First check if user exists
+  const existingUser = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+   console.log(existingUser)
+   
+  if (!existingUser) {
+    throw new Error(`User with ID ${userId} not found`);
+  }
+  
   return await prisma.user.update({
     where: { id: userId },
     data: { status: newStatus },
