@@ -134,14 +134,14 @@ exports.togglePackageStatus = async (req, res, next) => {
 
 exports.createMissionTemplate = async (req, res, next) => {
   try {
-    const { title, instruction, location, type, level } = req.body;
+    const { title, instruction, location, category, level } = req.body;
     
     // Validation
-    if (!title || !instruction || !location || !type) {
+    if (!title || !instruction || !location || !category) {
       return errorResponse(res, 400, 'Title, instruction, category, and type are required');
     }
     
-    if (!['AESTHETIC', 'SECRET_AGENT'].includes(type)) {
+    if (!['AESTHETIC', 'SECRET_AGENT'].includes(category)) {
       return errorResponse(res, 400, 'Type must be either AESTHETIC or SECRET_AGENT');
     }
     
@@ -153,7 +153,7 @@ exports.createMissionTemplate = async (req, res, next) => {
       title,
       instruction,
       location,
-      type,
+      category,
       level: level || 'NORMAL'
     });
     
@@ -165,10 +165,10 @@ exports.createMissionTemplate = async (req, res, next) => {
 
 exports.getAllMissionTemplates = async (req, res, next) => {
   try {
-    const { type, level, search } = req.query;
+    const { category, level, search } = req.query;
     
     const data = await adminService.getAllMissionTemplates({
-      type: type?.toUpperCase(),
+      category: category?.toUpperCase(),
       level: level?.toUpperCase(),
       search
     });
@@ -213,10 +213,10 @@ exports.getMissionTemplateById = async (req, res, next) => {
 exports.updateMissionTemplate = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { title, instruction, location, type, level } = req.body;
+    const { title, instruction, location, category, level } = req.body;
     
     // Validation
-    if (type && !['AESTHETIC', 'SECRET_AGENT'].includes(type)) {
+    if (category && !['AESTHETIC', 'SECRET_AGENT'].includes(category)) {
       return errorResponse(res, 400, 'Type must be either AESTHETIC or SECRET_AGENT');
     }
     
@@ -228,7 +228,7 @@ exports.updateMissionTemplate = async (req, res, next) => {
       title,
       instruction,
       location,
-      type,
+      category,
       level
     });
     
@@ -251,29 +251,15 @@ exports.deleteMissionTemplate = async (req, res, next) => {
 
 // ============== PRIVACY POLICY CONTROLLER FUNCTIONS ==============
 
-// ============== PRIVACY POLICY CONTROLLER FUNCTIONS ==============
-
 exports.createPrivacyPolicy = async (req, res, next) => {
   try {
-    const { language, content, version } = req.body;
-    
-    // Validation
-    if (!language || !content) {
-      return errorResponse(res, 400, 'Language and content are required');
+    const { contentEn, contentFr } = req.body;
+    if (!contentEn || !contentFr) {
+      return errorResponse(res, 400, 'Both English and French content are required');
     }
-    
-    // Validate language format (should be 2-letter code)
-    if (!/^[a-z]{2}$/.test(language)) {
-      return errorResponse(res, 400, 'Language must be a 2-letter lowercase code (e.g., en, fr)');
-    }
-    
-    const data = await adminService.createPrivacyPolicy({
-      language,
-      content,
-      version
-    });
-    
-    successResponse(res, 201, 'Privacy policy created successfully', data);
+
+    const data = await adminService.createPrivacyPolicy({ contentEn, contentFr });
+    successResponse(res, 201, 'Privacy policy created', data);
   } catch (err) {
     if (err.message.includes('already exists')) {
       return errorResponse(res, 409, err.message);
@@ -285,12 +271,8 @@ exports.createPrivacyPolicy = async (req, res, next) => {
 exports.getPrivacyPolicy = async (req, res, next) => {
   try {
     const data = await adminService.getPrivacyPolicy();
-    
-    if (!data) {
-      return errorResponse(res, 404, 'Privacy policy not found');
-    }
-    
-    successResponse(res, 200, 'Privacy policy fetched successfully', data);
+    if (!data) return errorResponse(res, 404, 'Privacy policy not found');
+    successResponse(res, 200, 'Privacy policy fetched', data);
   } catch (err) {
     next(err);
   }
@@ -298,25 +280,11 @@ exports.getPrivacyPolicy = async (req, res, next) => {
 
 exports.updatePrivacyPolicy = async (req, res, next) => {
   try {
-    const { language, content, version, isActive } = req.body;
-    
-    // Validate language format if provided
-    if (language && !/^[a-z]{2}$/.test(language)) {
-      return errorResponse(res, 400, 'Language must be a 2-letter lowercase code (e.g., en, fr)');
-    }
-    
-    const data = await adminService.updatePrivacyPolicy({
-      language,
-      content,
-      version,
-      isActive
-    });
-    
-    successResponse(res, 200, 'Privacy policy updated successfully', data);
+    const { contentEn, contentFr, isActive } = req.body;
+
+    const data = await adminService.updatePrivacyPolicy({ contentEn, contentFr, isActive });
+    successResponse(res, 200, 'Privacy policy updated', data);
   } catch (err) {
-    if (err.message.includes('not found')) {
-      return errorResponse(res, 404, err.message);
-    }
     next(err);
   }
 };
@@ -324,12 +292,10 @@ exports.updatePrivacyPolicy = async (req, res, next) => {
 exports.deletePrivacyPolicy = async (req, res, next) => {
   try {
     await adminService.deletePrivacyPolicy();
-    successResponse(res, 200, 'Privacy policy deleted successfully');
+    successResponse(res, 200, 'Privacy policy deleted');
   } catch (err) {
-    if (err.message.includes('not found')) {
-      return errorResponse(res, 404, err.message);
-    }
     next(err);
   }
 };
+
 

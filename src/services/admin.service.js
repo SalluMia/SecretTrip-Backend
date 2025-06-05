@@ -38,8 +38,8 @@ exports.getAdminDashboardStats = async () => {
       
       // Mission template stats
       prisma.missionTemplate.count(),
-      prisma.missionTemplate.count({ where: { type: 'AESTHETIC' } }),
-      prisma.missionTemplate.count({ where: { type: 'SECRET_AGENT' } })
+      prisma.missionTemplate.count({ where: { category: 'AESTHETIC' } }),
+      prisma.missionTemplate.count({ where: { category: 'SECRET_AGENT' } })
     ]);
 
     // Get recent users (last 5)
@@ -75,7 +75,7 @@ exports.getAdminDashboardStats = async () => {
         title: true,
         instruction: true,
         location: true,
-        type: true,
+        category: true,
         level: true
       }
     });
@@ -378,26 +378,26 @@ exports.togglePackageStatus = async (id, action) => {
 
 // ============== MISSION FUNCTIONS ==============
 
-exports.createMissionTemplate = async ({ title, instruction, location, type, level }) => {
+exports.createMissionTemplate = async ({ title, instruction, location, category, level }) => {
   return await prisma.missionTemplate.create({
     data: {
       title,
       instruction,
       location,
-      type,
+      category,
       level
     }
   });
 };
 
 exports.getAllMissionTemplates = async (filters = {}) => {
-  const { type, level, search } = filters;
+  const { category, level, search } = filters;
   
   const where = {};
   
   // Filter by type (AESTHETIC or SECRET_AGENT)
-  if (type && ['AESTHETIC', 'SECRET_AGENT'].includes(type)) {
-    where.type = type;
+  if (category && ['AESTHETIC', 'SECRET_AGENT'].includes(category)) {
+    where.category = category;
   }
   
   // Filter by level (NORMAL or CRITICAL)
@@ -425,7 +425,7 @@ exports.getMissionTemplateById = async (id) => {
   });
 };
 
-exports.updateMissionTemplate = async (id, { title, instruction, location, type, level }) => {
+exports.updateMissionTemplate = async (id, { title, instruction, location, category, level }) => {
   const existing = await prisma.missionTemplate.findUnique({ where: { id } });
   if (!existing) throw new Error('Mission template not found');
   
@@ -435,7 +435,7 @@ exports.updateMissionTemplate = async (id, { title, instruction, location, type,
       title,
       instruction,
       location,
-      type,
+      category,
       level
     }
   });
@@ -453,23 +453,31 @@ exports.deleteMissionTemplate = async (id) => {
 
 // ============== PRIVACY POLICY SERVICE FUNCTIONS ==============
 
-exports.createPrivacyPolicy = async ({ language, content, version }) => {
-  // Check if privacy policy already exists
+// Create policy with both EN + FR
+exports.createPrivacyPolicy = async ({ contentEn, contentFr }) => {
   const existing = await prisma.privacyPolicy.findFirst();
-  
+
   if (existing) {
-    throw new Error('Privacy policy already exists. Use update instead.');
+
+
+    return await prisma.privacyPolicy.update({
+      where: { id: existing.id },
+      data: {
+        contentEn: contentEn || existing.contentEn,
+        contentFr: contentFr || existing.contentFr,
+        updatedAt: new Date()
+      }
+    });
   }
-  
+
   return await prisma.privacyPolicy.create({
     data: {
-      language,
-      content,
-      version: version || '1.0',
-      isActive: true
+      contentEn,
+      contentFr,
     }
   });
 };
+
 
 exports.getPrivacyPolicy = async () => {
   return await prisma.privacyPolicy.findFirst({
@@ -477,39 +485,29 @@ exports.getPrivacyPolicy = async () => {
   });
 };
 
-exports.updatePrivacyPolicy = async ({ language, content, version, isActive }) => {
+exports.updatePrivacyPolicy = async ({ contentEn, contentFr, isActive }) => {
   const existing = await prisma.privacyPolicy.findFirst();
-  
-  if (!existing) {
-    throw new Error('Privacy policy not found');
-  }
-  
-  // Auto-increment version if content is being updated
-  let newVersion = existing.version;
-  if (content && content !== existing.content) {
-    const versionNumber = parseFloat(existing.version) + 0.1;
-    newVersion = version || versionNumber.toFixed(1);
-  }
-  
+  if (!existing) throw new Error('Privacy policy not found');
+
+  const isContentEnChanged = contentEn !== undefined && contentEn !== existing.contentEn;
+  const isContentFrChanged = contentFr !== undefined && contentFr !== existing.contentFr;
+
+
   return await prisma.privacyPolicy.update({
     where: { id: existing.id },
     data: {
-      language: language || existing.language,
-      content: content || existing.content,
-      version: newVersion,
-      isActive: isActive !== undefined ? isActive : existing.isActive
+      ...(isContentEnChanged && { contentEn }),
+      ...(isContentFrChanged && { contentFr }),
+      ...(isActive !== undefined && { isActive }),
     }
   });
 };
 
+
+
 exports.deletePrivacyPolicy = async () => {
   const existing = await prisma.privacyPolicy.findFirst();
-  
-  if (!existing) {
-    throw new Error('Privacy policy not found');
-  }
-  
-  return await prisma.privacyPolicy.delete({
-    where: { id: existing.id }
-  });
+  if (!existing) throw new Error('Privacy policy not found');
+
+  return await prisma.privacyPolicy.delete({ where: { id: existing.id } });
 };

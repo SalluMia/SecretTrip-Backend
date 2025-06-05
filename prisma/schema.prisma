@@ -77,7 +77,7 @@ model MissionTemplate {
   instruction    String
   location       String?
   sampleImageUrl String?
-  type MissionType   // this is actually category so its ok as type dont change 
+  category MissionType?   // this is actually category so its ok as type dont change 
   level MissionLevel @default(NORMAL)
 }
 
@@ -153,15 +153,16 @@ model Package {
 }
 
 model PrivacyPolicy {
-  id        String   @id @default(uuid())
-  language  String   // 'en' for English, 'fr' for French, etc.
-  content   String   // The actual privacy policy content
-  version   String   @default("1.0") // Version tracking
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid())
+  contentEn  String?   // English content
+  contentFr  String?   // French content
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
   @@map("privacy_policies")
 }
+
 
 
 enum Role {
