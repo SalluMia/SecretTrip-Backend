@@ -141,8 +141,7 @@ exports.getTripsByStatus = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { status } = req.query;
-
-    if (!['ACTIVE', 'UPCOMING', 'COMPLETED'].includes(status)) {
+    if (!['ACTIVE', 'UPCOMING', 'COMPLETED', 'active','upcoming','completed'].includes(status)) {
       return errorResponse(res, 400, 'Invalid status. Must be one of: active, upcoming, completed');
     }
 
