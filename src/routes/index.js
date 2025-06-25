@@ -5,6 +5,9 @@ const adminInterests=  require('./travelInterest.routes');
 const tripRoutes=require('./trip.routes')
 const homeRoutes=require('./home.routes')
 const adminRoutes=require('./admin.routes')
+const missionRoutes = require('./mission.routes'); // NEW
+const albumRoutes = require('./album.routes');     // NEW
+const paymentRoutes = require('./payment.routes'); // NEW
 const router = express.Router();
 
 router.use('/auth', authRoutes);
@@ -13,5 +16,8 @@ router.use('/admin/interests', adminInterests);
 router.use('/trip', tripRoutes);
 router.use('/home', homeRoutes);
 router.use('/admin', adminRoutes);
+router.use('/missions', missionRoutes);     // NEW
+router.use('/albums', albumRoutes);         // NEW
+router.use('/payments', paymentRoutes);     // NEW
 
 module.exports = router;

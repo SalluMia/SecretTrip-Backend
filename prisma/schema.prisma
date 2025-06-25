@@ -1,3 +1,4 @@
+// Updated prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -21,29 +22,54 @@ model User {
   passwordResetToken     String?
   passwordResetExpires   DateTime?
 
+  // Profile completion
   isProfileCompleted Boolean          @default(false)
   interests          TravelInterest[] @relation("UserInterests")
 
-  status UserStatus @default(ACTIVE)
-  tripsJoined      Trip[]            @relation("TripMembers")
-  assignedMissions AssignedMission[]
-  payments         Payment[]
-  createdTrips     Trip[]            @relation("CreatedTrips")
-  joinRequests     JoinRequest[]
-  tripAliases      TripAlias[]
+  // User status and activity
+  status     UserStatus @default(ACTIVE)
+  lastActive DateTime?  @default(now())
+
+  // Notification support
+  fcmToken                String? // Firebase Cloud Messaging token
+  notificationPreferences Json?   @default("{\"tripRequests\": true, \"missionAssignments\": true, \"tripUpdates\": true}")
+
+  // Relationships
+  tripsJoined       Trip[]            @relation("TripMembers")
+  assignedMissions  AssignedMission[]
+  payments          Payment[]
+  createdTrips      Trip[]            @relation("CreatedTrips")
+  joinRequests      JoinRequest[]
+  tripAliases       TripAlias[]
+  notificationHistory NotificationHistory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([fcmToken])
+  @@index([lastActive])
 }
 
 model Trip {
   id               String            @id @default(uuid())
   name             String
-  theme            String
+  description      String?           // Optional trip description
+  theme            String            // "AESTHETIC" or "SECRET_AGENT"
   code             String            @unique
   startDate        DateTime
   endDate          DateTime
-  status TripStatus @default(UPCOMING)
+  status           TripStatus        @default(UPCOMING)
+  tripMode         String            @default("normal") // normal | fun
+  
+  // Trip management
+  maxMembers       Int               @default(20)
+  isPublic         Boolean           @default(false)
+  
+  // Statistics
+  totalMissions    Int               @default(0)
+  completedMissions Int              @default(0)
+  
+  // Relationships
   creatorId        String
   creator          User              @relation("CreatedTrips", fields: [creatorId], references: [id])
   members          User[]            @relation("TripMembers")
@@ -51,11 +77,14 @@ model Trip {
   album            Album?
   payments         Payment[]
   joinRequests     JoinRequest[]
-  tripMode         String            @default("normal") // normal | fun
   tripAliases      TripAlias[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([code])
+  @@index([status])
+  @@index([startDate])
 }
 
 model TripAlias {
@@ -69,16 +98,25 @@ model TripAlias {
 
   @@unique([tripId, alias])
   @@unique([tripId, userId])
+  @@index([tripId, alias])
 }
 
 model MissionTemplate {
-  id             String  @id @default(uuid())
+  id             String        @id @default(uuid())
   title          String
   instruction    String
   location       String?
   sampleImageUrl String?
-  category MissionType?   // this is actually category so its ok as type dont change 
-  level MissionLevel @default(NORMAL)
+  category       MissionType?  // AESTHETIC or SECRET_AGENT
+  level          MissionLevel  @default(NORMAL)
+  isActive       Boolean       @default(true) // For enabling/disabling missions
+  
+  createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt @default(now())
+
+  @@index([category])
+  @@index([level])
+  @@index([isActive])
 }
 
 model AssignedMission {
@@ -93,10 +131,15 @@ model AssignedMission {
   completed      Boolean   @default(false)
   submittedAt    DateTime?
   createdAt      DateTime  @default(now())
+  
   user User @relation(fields: [userId], references: [id])
   trip Trip @relation(fields: [tripId], references: [id])
-}
 
+  @@index([userId, tripId])
+  @@index([tripId, completed])
+  @@index([completed])
+  @@index([submittedAt])
+}
 
 model Album {
   id        String   @id @default(uuid())
@@ -104,6 +147,7 @@ model Album {
   pdfUrl    String
   pdfHDUrl  String?
   printed   Boolean  @default(false)
+  expiresAt DateTime? // When free access expires
   createdAt DateTime @default(now())
 
   trip Trip @relation(fields: [tripId], references: [id])
@@ -113,13 +157,19 @@ model Payment {
   id        String   @id @default(uuid())
   userId    String
   tripId    String
-  type      String
-  amount    Int
-  status    String
+  type      String   // "album_hd" or "album_print"
+  amount    Int      // Amount in cents
+  currency  String   @default("EUR")
+  status    String   // "pending", "completed", "failed", "refunded"
+  stripePaymentIntentId String? // Stripe payment ID
   timestamp DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
   trip Trip @relation(fields: [tripId], references: [id])
+
+  @@index([userId])
+  @@index([tripId])
+  @@index([status])
 }
 
 model TravelInterest {
@@ -135,13 +185,18 @@ model JoinRequest {
   userId    String
   alias     String
   status    String   @default("pending") // pending | approved | rejected
+  message   String?  // Optional message from user
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt @default(now())
 
   user User @relation(fields: [userId], references: [id])
   trip Trip @relation(fields: [tripId], references: [id])
 
   @@unique([tripId, userId])
+  @@index([status])
+  @@index([createdAt])
 }
+
 model Package {
   id        String   @id @default(uuid())
   name      String
@@ -163,12 +218,32 @@ model PrivacyPolicy {
   @@map("privacy_policies")
 }
 
+// New model for notification tracking
+model NotificationHistory {
+  id      String   @id @default(uuid())
+  userId  String
+  type    String   // "JOIN_REQUEST", "REQUEST_APPROVED", "NEW_MISSION", etc.
+  title   String
+  body    String
+  data    Json?    // Additional notification data
+  sentAt  DateTime @default(now())
+  read    Boolean  @default(false)
+  success Boolean  @default(true)
+  error   String?  // Error message if sending failed
 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([sentAt])
+  @@index([type])
+  @@index([read])
+}
 
 enum Role {
   USER
   ADMIN
 }
+
 enum UserStatus {
   ACTIVE
   BLOCKED
@@ -189,6 +264,7 @@ enum MissionLevel {
   NORMAL
   CRITICAL
 }
+
 enum PackageStatus {
   ACTIVE
   INACTIVE

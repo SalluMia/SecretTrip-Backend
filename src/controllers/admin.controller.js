@@ -1,6 +1,5 @@
 const adminService = require('../services/admin.service');
 const { successResponse, errorResponse } = require('../utils/response');
-
 exports.getDashboardAnalytics = async (req, res, next) => {
   try {
     const data = await adminService.getAdminDashboardStats();
@@ -298,4 +297,58 @@ exports.deletePrivacyPolicy = async (req, res, next) => {
   }
 };
 
+// Get payment analytics (admin only)
+exports.getPaymentAnalytics = async (req, res, next) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    const analytics = await paymentService.getPaymentAnalytics(startDate, endDate);
+    successResponse(res, 200, 'Payment analytics retrieved', analytics);
+  } catch (err) {
+    next(err);
+  }
+};
 
+// Manually generate album (admin only)
+exports.generateAlbum = async (req, res, next) => {
+  try {
+    const { tripId } = req.params;
+    
+    const result = await albumService.generateTripAlbum(tripId);
+    successResponse(res, 200, 'Album generated successfully', result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Refund payment (admin only)
+exports.refundPayment = async (req, res, next) => {
+  try {
+    const { paymentId } = req.params;
+    const { reason } = req.body;
+    
+    const refund = await paymentService.refundPayment(paymentId, reason);
+    successResponse(res, 200, 'Payment refunded successfully', refund);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Manually activate trip (admin/creator only)
+exports.manuallyActivateTrip = async (req, res, next) => {
+  try {
+    const { tripId } = req.params;
+    const creatorId = req.user.id;
+    
+    const missionScheduler = require('../services/missionScheduler.service');
+    const result = await missionScheduler.manuallyActivateTrip(tripId, creatorId);
+    
+    successResponse(res, 200, 'Trip activated manually', {
+      tripId: result.id,
+      name: result.name,
+      status: result.status
+    });
+  } catch (err) {
+    next(err);
+  }
+};

@@ -39,5 +39,10 @@ router.get('/privacy-policy', adminController.getPrivacyPolicy);
 router.put('/privacy-policy', adminController.updatePrivacyPolicy);
 router.delete('/privacy-policy', adminController.deletePrivacyPolicy);
 
+router.get('/payments/analytics', adminController.getPaymentAnalytics);
+router.post('/albums/generate/:tripId', adminController.generateAlbum);
+router.post('/payments/:paymentId/refund', adminController.refundPayment);
+router.post('/trips/:tripId/activate-manual', adminController.manuallyActivateTrip);
+
 
 module.exports = router;
