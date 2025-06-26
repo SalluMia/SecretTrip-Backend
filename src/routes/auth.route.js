@@ -1,7 +1,9 @@
 const express = require('express');
 const passport = require('passport');
-const { signup, login, verifyOTP, resendOTP, forgotPassword, verifyResetToken, resetPassword } = require('../controllers/auth.controller');
+const { signup, login, verifyOTP, resendOTP, forgotPassword, verifyResetToken, resetPassword, logout, removeFCMToken, testFCMToken } = require('../controllers/auth.controller');
 const jwt = require('jsonwebtoken');
+const { updateFCMToken } = require('../controllers/trip.controller');
+const auth = require('../middlewares/auth');
 const router = express.Router();
 
 router.post('/signup', signup);
@@ -21,5 +23,14 @@ router.get(
   }
 );
 
+router.use(auth); // Apply auth middleware to all routes below
+
+// Logout with FCM token clearing
+router.post('/logout', logout);
+
+// FCM Token management endpoints
+// router.put('/fcm-token', updateFCMToken);
+router.delete('/fcm-token', removeFCMToken);
+router.post('/fcm-token/test', testFCMToken);
 
 module.exports = router;

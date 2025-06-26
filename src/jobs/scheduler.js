@@ -5,12 +5,6 @@ const missionScheduler = require('../services/missionScheduler.service');
 function startScheduledJobs() {
   console.log('🕐 Starting scheduled jobs...');
 
-  // Check for trips to end every hour at 30 minutes past
-  cron.schedule('30 * * * *', async () => {
-    console.log('🏁 Checking for trips to end...');
-    await missionScheduler.checkTripsToEnd();
-  });
-
   // Send mission reminders daily at 8 PM
   cron.schedule('0 20 * * *', async () => {
     console.log('⏰ Sending mission reminders...');

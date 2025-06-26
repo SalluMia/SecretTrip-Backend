@@ -128,6 +128,9 @@ model AssignedMission {
   category       String
   sampleImageUrl String?
   photoUrl       String?
+  thumbnailUrl   String?   // Add this
+  caption        String?   // Add this
+  dayAssigned    Int?      // Add this - which day of the trip
   completed      Boolean   @default(false)
   submittedAt    DateTime?
   createdAt      DateTime  @default(now())
@@ -139,6 +142,7 @@ model AssignedMission {
   @@index([tripId, completed])
   @@index([completed])
   @@index([submittedAt])
+  @@index([dayAssigned])  // Add this index
 }
 
 model Album {

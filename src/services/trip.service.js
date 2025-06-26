@@ -1,11 +1,11 @@
 // 🚀 Secret Trip Full Functional Implementation (Trips + Missions)
-// Prisma schema is already up-to-date (TripAlias, tripMode, etc.)
+// Enhanced with direct join and notifications
 
 const { prisma } = require('../config/prisma');
 const { generateCode } = require('../utils/generateCode');
 const { shuffleArray, tripDurationDays } = require('../utils/helpers');
 
-exports.createTrip = async ({ userId, name, theme, startDate, endDate, alias, tripMode = 'normal' }) => {
+exports.createTrip = async ({ userId, name, theme, startDate, endDate, alias, tripMode = 'normal', description }) => {
   const code = generateCode(6);
   const trip = await prisma.trip.create({
     data: {
@@ -17,6 +17,7 @@ exports.createTrip = async ({ userId, name, theme, startDate, endDate, alias, tr
       code,
       creatorId: userId,
       tripMode,
+      description,
       members: { connect: { id: userId } },
     }
   });
@@ -28,85 +29,204 @@ exports.createTrip = async ({ userId, name, theme, startDate, endDate, alias, tr
   return { tripId: trip.id, code: trip.code };
 };
 
-exports.requestJoinTrip = async ({ userId, alias, code }) => {
-  const trip = await prisma.trip.findUnique({ where: { code } });
-  if (!trip) throw new Error('Trip not found');
-
-  const aliasTaken = await prisma.tripAlias.findFirst({
-    where: { tripId: trip.id, alias }
-  });
-  if (aliasTaken) throw new Error('Alias already taken');
-
-  const alreadyRequested = await prisma.joinRequest.findUnique({
-    where: { tripId_userId: { tripId: trip.id, userId } }
-  });
-  if (alreadyRequested) throw new Error('Already requested');
-
-  return await prisma.joinRequest.create({
-    data: { tripId: trip.id, userId, alias }
-  });
-};
-
-exports.respondToRequest = async ({ tripId, userId, action, creatorId }) => {
-  const trip = await prisma.trip.findUnique({ where: { id: tripId } });
-  if (!trip || trip.creatorId !== creatorId) throw new Error('Unauthorized');
-
-  if (action === 'approve') {
-    await prisma.trip.update({
-      where: { id: tripId },
-      data: { members: { connect: { id: userId } } }
-    });
-
-    const alias = await prisma.joinRequest.findUnique({
-      where: { tripId_userId: { tripId, userId } }
-    });
-
-    await prisma.tripAlias.upsert({
-  where: {
-    tripId_userId: {
-      tripId,
-      userId
-    }
-  },
-  update: {
-    alias: alias.alias
-  },
-  create: {
-    tripId,
-    userId,
-    alias: alias.alias
-  }
-});
-
-  }
-
-  return await prisma.joinRequest.update({
-    where: { tripId_userId: { tripId, userId } },
-    data: { status: action }
-  });
-};
-
-exports.getPendingRequests = async ({ tripId, creatorId }) => {
-  const trip = await prisma.trip.findUnique({ where: { id: tripId } });
-  if (!trip || trip.creatorId !== creatorId) {
-    throw new Error('Unauthorized or trip not found');
-  }
-
-  return prisma.joinRequest.findMany({
-    where: {
-      tripId,
-      status: 'pending'
-    },
+// Enhanced trip preview with detailed information
+exports.getTripByCodeWithDetails = async ({ code, userId }) => {
+  const trip = await prisma.trip.findUnique({
+    where: { code },
     include: {
-      user: {
+      creator: {
         select: {
           id: true,
-          email: true,
-          displayName: true
+          displayName: true,
+          profilePhotoUrl: true
+        }
+      },
+      members: {
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true,
+          email:true,
+        }
+      },
+      tripAliases: {
+        select: {
+          alias: true,
+          userId: true,
+          user: {
+            select: {
+              displayName: true,
+              profilePhotoUrl: true
+            }
+          }
         }
       }
     }
   });
+
+  if (!trip) {
+    throw new Error('Trip not found with this code');
+  }
+
+  // Check if user is already a member
+  const isAlreadyMember = trip.members.some(member => member.id === userId);
+  
+  // Get members with their aliases
+  const membersWithAliases = trip.members.map(member => {
+    const aliasInfo = trip.tripAliases.find(ta => ta.userId === member.id);
+    return {
+      id: member.id,
+      displayName: member.displayName,
+      profilePhotoUrl: member.profilePhotoUrl,
+      alias: aliasInfo?.alias || null,
+      isCreator: member.id === trip.creatorId
+    };
+  });
+
+  // Get taken aliases for validation
+  const takenAliases = trip.tripAliases.map(ta => ta.alias);
+
+  return {
+    id: trip.id,
+    name: trip.name,
+    description: trip.description,
+    theme: trip.theme,
+    startDate: trip.startDate,
+    endDate: trip.endDate,
+    status: trip.status,
+    tripMode: trip.tripMode,
+    creator: trip.creator,
+    memberCount: trip.members.length,
+    members: membersWithAliases,
+    takenAliases,
+    isAlreadyMember,
+    canJoin: !isAlreadyMember && trip.status === 'UPCOMING',
+    joinMessage: isAlreadyMember 
+      ? 'You are already a member of this trip'
+      : trip.status !== 'UPCOMING'
+      ? 'This trip is no longer accepting new members'
+      : 'You can join this trip'
+  };
+};
+
+// Direct join trip without approval process
+exports.joinTripDirectly = async ({ userId, alias, code }) => {
+  const trip = await prisma.trip.findUnique({
+    where: { code },
+    include: {
+      members: true,
+      tripAliases: true
+    }
+  });
+
+  if (!trip) {
+    throw new Error('Trip not found');
+  }
+  
+  if (trip.status !== 'UPCOMING') {
+    throw new Error('Cannot join trip that has already started or ended');
+  }
+
+  // Check if already a member
+  const isAlreadyMember = trip.members.some(member => member.id === userId);
+  if (isAlreadyMember) {
+    throw new Error('You are already a member of this trip');
+  }
+
+  // Check if alias is taken
+  const aliasTaken = trip.tripAliases.some(ta => ta.alias.toLowerCase() === alias.toLowerCase());
+  if (aliasTaken) {
+    throw new Error('This alias is already taken for this trip');
+  }
+
+  // Add user to trip members
+  await prisma.trip.update({
+    where: { id: trip.id },
+    data: {
+      members: {
+        connect: { id: userId }
+      }
+    }
+  });
+
+  // Create trip alias
+  await prisma.tripAlias.create({
+    data: {
+      tripId: trip.id,
+      userId,
+      alias
+    }
+  });
+
+  return {
+    tripId: trip.id,
+    tripName: trip.name,
+    alias,
+    message: `Successfully joined "${trip.name}" as ${alias}`,
+    memberCount: trip.members.length + 1
+  };
+};
+
+// Get trip members with aliases
+exports.getTripMembers = async ({ tripId, userId }) => {
+  // Check if user is member or creator of the trip
+  const trip = await prisma.trip.findFirst({
+    where: {
+      id: tripId,
+      OR: [
+        { creatorId: userId },
+        { members: { some: { id: userId } } }
+      ]
+    },
+    include: {
+      members: {
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true
+        }
+      },
+      tripAliases: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              displayName: true,
+              profilePhotoUrl: true
+            }
+          }
+        }
+      },
+      creator: {
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true
+        }
+      }
+    }
+  });
+
+  if (!trip) {
+    throw new Error('Trip not found or access denied');
+  }
+
+  const membersWithAliases = trip.members.map(member => {
+    const alias = trip.tripAliases.find(ta => ta.userId === member.id);
+    return {
+      ...member,
+      alias: alias?.alias || null,
+      isCreator: member.id === trip.creatorId
+    };
+  });
+
+  return {
+    tripId: trip.id,
+    tripName: trip.name,
+    creator: trip.creator,
+    members: membersWithAliases,
+    totalMembers: membersWithAliases.length
+  };
 };
 
 exports.getMyTrips = async (userId) => {
@@ -220,14 +340,13 @@ exports.submitMissionPhoto = async ({ missionId, userId, photoUrl }) => {
   });
 };
 
-
 // ✅ Get filtered trips by status (upcoming, active, completed)
 exports.getTripsByStatus = async ({ userId, status }) => {
   const mappedStatus = {
     upcoming: 'UPCOMING',
     active: 'ACTIVE',
     completed: 'COMPLETED'
-  }[status];
+  }[status.toLowerCase()] || status.toUpperCase();
 
   const trips = await prisma.trip.findMany({
     where: {
@@ -331,289 +450,5 @@ exports.getTripAlbumPreview = async ({ userId, tripId }) => {
     pdfUrl: trip.album.pdfUrl,
     pdfHDUrl: trip.album.pdfHDUrl,
     photos: trip.assignedMissions.map(m => m.photoUrl)
-  };
-};
-
-// Get trip details by code (for preview before joining)
-exports.getTripByCode = async ({ code, userId }) => {
-  const trip = await prisma.trip.findUnique({
-    where: { code },
-    include: {
-      creator: {
-        select: {
-          id: true,
-          displayName: true,
-          profilePhotoUrl: true
-        }
-      },
-      members: {
-        select: {
-          id: true,
-          displayName: true,
-          profilePhotoUrl: true
-        }
-      },
-      tripAliases: {
-        select: {
-          alias: true,
-          userId: true,
-          user: {
-            select: {
-              displayName: true
-            }
-          }
-        }
-      },
-      joinRequests: {
-        where: {
-          status: 'pending'
-        },
-        select: {
-          userId: true,
-          alias: true
-        }
-      }
-    }
-  });
-
-  if (!trip) {
-    throw new Error('Trip not found with this code');
-  }
-
-  // Check if user is already a member
-  const isAlreadyMember = trip.members.some(member => member.id === userId);
-  
-  // Check if user already has a pending request
-  const hasPendingRequest = trip.joinRequests.some(request => request.userId === userId);
-
-  // Get taken aliases
-  const takenAliases = trip.tripAliases.map(ta => ta.alias);
-
-  return {
-    id: trip.id,
-    name: trip.name,
-    theme: trip.theme,
-    startDate: trip.startDate,
-    endDate: trip.endDate,
-    status: trip.status,
-    creator: trip.creator,
-    memberCount: trip.members.length,
-    members: trip.members,
-    takenAliases,
-    isAlreadyMember,
-    hasPendingRequest,
-    canJoin: !isAlreadyMember && !hasPendingRequest && trip.status === 'UPCOMING'
-  };
-};
-
-// Enhanced join request with better validation
-exports.requestJoinTripEnhanced = async ({ userId, alias, code }) => {
-  const trip = await prisma.trip.findUnique({
-    where: { code },
-    include: {
-      members: true,
-      tripAliases: true,
-      joinRequests: {
-        where: { status: 'pending' }
-      }
-    }
-  });
-
-  if (!trip) throw new Error('Trip not found');
-  
-  if (trip.status !== 'UPCOMING') {
-    throw new Error('Cannot join trip that has already started or ended');
-  }
-
-  // Check if already a member
-  const isAlreadyMember = trip.members.some(member => member.id === userId);
-  if (isAlreadyMember) throw new Error('You are already a member of this trip');
-
-  // Check if already has pending request
-  const hasPendingRequest = trip.joinRequests.some(request => request.userId === userId);
-  if (hasPendingRequest) throw new Error('You already have a pending request for this trip');
-
-  // Check if alias is taken
-  const aliasTaken = trip.tripAliases.some(ta => ta.alias.toLowerCase() === alias.toLowerCase());
-  if (aliasTaken) throw new Error('This alias is already taken for this trip');
-
-  // Check if alias is in pending requests
-  const aliasInPending = trip.joinRequests.some(req => req.alias.toLowerCase() === alias.toLowerCase());
-  if (aliasInPending) throw new Error('This alias is already requested by another user');
-
-  const joinRequest = await prisma.joinRequest.create({
-    data: {
-      tripId: trip.id,
-      userId,
-      alias,
-      status: 'pending'
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          displayName: true,
-          profilePhotoUrl: true,
-          email: true
-        }
-      },
-      trip: {
-        select: {
-          name: true,
-          creator: {
-            select: {
-              id: true,
-              displayName: true
-            }
-          }
-        }
-      }
-    }
-  });
-
-  // Send notification to trip creator
-  // (We'll implement this in the notification service)
-  
-  return {
-    requestId: joinRequest.id,
-    message: 'Join request sent successfully',
-    tripName: trip.name,
-    alias: joinRequest.alias
-  };
-};
-
-// Enhanced respond to request with notifications
-exports.respondToRequestEnhanced = async ({ tripId, userId, action, creatorId }) => {
-  const trip = await prisma.trip.findUnique({
-    where: { id: tripId },
-    include: {
-      creator: true
-    }
-  });
-  
-  if (!trip || trip.creatorId !== creatorId) {
-    throw new Error('Unauthorized or trip not found');
-  }
-
-  const joinRequest = await prisma.joinRequest.findUnique({
-    where: { tripId_userId: { tripId, userId } },
-    include: {
-      user: {
-        select: {
-          id: true,
-          displayName: true,
-          email: true,
-          profilePhotoUrl: true
-        }
-      }
-    }
-  });
-
-  if (!joinRequest) {
-    throw new Error('Join request not found');
-  }
-
-  if (joinRequest.status !== 'pending') {
-    throw new Error('This request has already been processed');
-  }
-
-  // Update join request status
-  const updatedRequest = await prisma.joinRequest.update({
-    where: { tripId_userId: { tripId, userId } },
-    data: { status: action === 'approve' ? 'approved' : 'rejected' }
-  });
-
-  if (action === 'approve') {
-    // Add user to trip members
-    await prisma.trip.update({
-      where: { id: tripId },
-      data: {
-        members: {
-          connect: { id: userId }
-        }
-      }
-    });
-
-    // Create trip alias
-    await prisma.tripAlias.create({
-      data: {
-        tripId,
-        userId,
-        alias: joinRequest.alias
-      }
-    });
-  }
-
-  // Send notification to user
-  // (We'll implement this in the notification service)
-
-  return {
-    action,
-    user: joinRequest.user,
-    tripName: trip.name,
-    alias: joinRequest.alias,
-    message: `Request ${action === 'approve' ? 'approved' : 'rejected'} successfully`
-  };
-};
-
-// Get trip members with aliases
-exports.getTripMembers = async ({ tripId, userId }) => {
-  // Check if user is member or creator of the trip
-  const trip = await prisma.trip.findFirst({
-    where: {
-      id: tripId,
-      OR: [
-        { creatorId: userId },
-        { members: { some: { id: userId } } }
-      ]
-    },
-    include: {
-      members: {
-        select: {
-          id: true,
-          displayName: true,
-          profilePhotoUrl: true
-        }
-      },
-      tripAliases: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              displayName: true,
-              profilePhotoUrl: true
-            }
-          }
-        }
-      },
-      creator: {
-        select: {
-          id: true,
-          displayName: true,
-          profilePhotoUrl: true
-        }
-      }
-    }
-  });
-
-  if (!trip) {
-    throw new Error('Trip not found or access denied');
-  }
-
-  const membersWithAliases = trip.members.map(member => {
-    const alias = trip.tripAliases.find(ta => ta.userId === member.id);
-    return {
-      ...member,
-      alias: alias?.alias || null,
-      isCreator: member.id === trip.creatorId
-    };
-  });
-
-  return {
-    tripId: trip.id,
-    tripName: trip.name,
-    creator: trip.creator,
-    members: membersWithAliases,
-    totalMembers: membersWithAliases.length
   };
 };

@@ -8,6 +8,7 @@ const passport = require('passport');
 const errorHandler = require('./middlewares/errorHandler');
 const { pinoLogger } = require('./config/logger');
 const { prisma, connectDB } = require('./config/prisma');
+const { startScheduledJobs } = require('./jobs/scheduler'); 
 require('./config/passport');
 
 dotenv.config();
@@ -94,5 +95,9 @@ connectDB().then(() => {
   app.listen(PORT, () => {
     pinoLogger.info(`🚀 Server started on port ${PORT}`);
     pinoLogger.info(`📁 Static files served from: ${path.join(__dirname, 'uploads')}`);
+
+    // START MISSION SCHEDULER - ADD THESE LINES
+    startScheduledJobs();
+    pinoLogger.info(`⏰ Mission scheduler started`);
   });
 });

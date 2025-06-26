@@ -1,299 +1,394 @@
+// src/services/missionScheduler.service.js
 const { prisma } = require('../config/prisma');
 const { shuffleArray, tripDurationDays } = require('../utils/helpers');
 const notificationService = require('./notification.service');
-const albumService = require('./album.service');
 const cron = require('node-cron');
 
-// 🕒 Start cron scheduler
-exports.startScheduler = () => {
-  cron.schedule('0 * * * *', async () => {
-    console.log('🕒 Checking for trips to activate...');
-    await exports.checkAndActivateTrips();
-  });
+class MissionSchedulerService {
+  constructor() {
+    this.startScheduler();
+  }
 
-  cron.schedule('0 6 * * *', async () => {
-    console.log('🎯 Assigning daily missions...');
-    await exports.assignDailyMissions();
-  });
-};
-
-// 🚀 Check and activate upcoming trips
-exports.checkAndActivateTrips = async () => {
-  try {
-    const now = new Date();
-    const trips = await prisma.trip.findMany({
-      where: { status: 'UPCOMING', startDate: { lte: now } },
-      include: { members: true, tripAliases: true }
+  // Start the cron job to check for trips that should begin
+  startScheduler() {
+    // Run every hour to check for trips that should start
+    cron.schedule('0 * * * *', async () => {
+      console.log('🕒 Checking for trips to activate...');
+      await this.checkAndActivateTrips();
     });
 
-    for (const trip of trips) {
-      await exports.activateTripAndAssignMissions(trip);
-    }
-  } catch (err) {
-    console.error('Error checking trips:', err);
-  }
-};
+    // Run daily at 6 AM to assign daily missions
+    cron.schedule('0 6 * * *', async () => {
+      console.log('🎯 Assigning daily missions...');
+      await this.assignDailyMissions();
+    });
 
-// 🧠 Trip mission distribution logic
-function calculateMissionDistribution(trip) {
-  const N = trip.members.length;
-  const D = tripDurationDays(trip.startDate, trip.endDate);
-  const X = (N * D < 40) ? 100 : 80;
-  const M = Math.ceil(X / N);
-  const m = Math.ceil(M / D);
-
-  return {
-    participantCount: N,
-    durationDays: D,
-    targetPhotos: X,
-    missionsPerUser: M,
-    missionsPerUserPerDay: m,
-    totalMissions: N * M
-  };
-}
-
-// 📋 Fetch mission templates
-async function getMissionTemplates(theme, tripMode) {
-  const where = { isActive: true };
-
-  if (tripMode === 'fun') {
-    where.category = { in: ['AESTHETIC', 'SECRET_AGENT'] };
-  } else {
-    where.category = 'AESTHETIC';
+    // Check for trips to end every hour at 30 minutes past
+    cron.schedule('30 * * * *', async () => {
+      console.log('🏁 Checking for trips to end...');
+      await this.checkTripsToEnd();
+    });
   }
 
-  const templates = await prisma.missionTemplate.findMany({
-    where,
-    orderBy: { createdAt: 'desc' }
-  });
-
-  if (!templates.length) {
-    throw new Error(`No mission templates found`);
-  }
-
-  return templates;
-}
-
-// 🎯 Assign missions to all members
-async function assignMissionsToMembers(trip, templates, dist) {
-  const missions = [];
-
-  for (const member of trip.members) {
-    const userMissions = selectMissionsForUser(templates, dist.missionsPerUser, trip.tripMode);
-
-    for (let i = 0; i < userMissions.length; i++) {
-      const m = userMissions[i];
-      const day = Math.floor(i / dist.missionsPerUserPerDay) + 1;
-
-      missions.push({
-        userId: member.id,
-        tripId: trip.id,
-        title: m.title,
-        instruction: m.instruction,
-        category: m.category,
-        sampleImageUrl: m.sampleImageUrl,
-        dayAssigned: day,
-        createdAt: new Date()
+  // Check for trips that should be activated (start date reached)
+  async checkAndActivateTrips() {
+    try {
+      const now = new Date();
+      const tripsToActivate = await prisma.trip.findMany({
+        where: {
+          status: 'UPCOMING',
+          startDate: {
+            lte: now
+          }
+        },
+        include: {
+          members: true,
+          tripAliases: true
+        }
       });
-    }
-  }
 
-  await prisma.assignedMission.createMany({ data: missions });
-
-  for (const member of trip.members) {
-    const alias = trip.tripAliases.find(a => a.userId === member.id)?.alias || 'Agent';
-    await notificationService.sendMissionAssignedNotification({
-      userId: member.id,
-      missionTitle: `${dist.missionsPerUserPerDay} nouvelles missions`,
-      tripName: trip.name,
-      alias
-    });
-  }
-}
-
-// 🎲 Mission selection
-function selectMissionsForUser(templates, count, mode) {
-  let selected = [];
-  const aesthetic = templates.filter(t => t.category === 'AESTHETIC');
-  const secret = templates.filter(t => t.category === 'SECRET_AGENT');
-
-  if (mode === 'fun') {
-    for (let i = 0; i < count; i++) {
-      const isSecret = Math.random() < (2 / 7);
-      const pool = isSecret && secret.length ? secret : aesthetic;
-      const rand = Math.floor(Math.random() * pool.length);
-      selected.push(pool[rand]);
-    }
-  } else {
-    selected = shuffleArray(templates).slice(0, count);
-  }
-
-  while (selected.length < count) {
-    const random = templates[Math.floor(Math.random() * templates.length)];
-    selected.push(random);
-  }
-
-  return selected;
-}
-
-// ✅ Activate a single trip
-exports.activateTripAndAssignMissions = async (trip) => {
-  try {
-    console.log(`🚀 Activating trip: ${trip.name}`);
-    const dist = calculateMissionDistribution(trip);
-    const templates = await getMissionTemplates(trip.theme, trip.tripMode);
-
-    await assignMissionsToMembers(trip, templates, dist);
-
-    await prisma.trip.update({
-      where: { id: trip.id },
-      data: {
-        status: 'ACTIVE',
-        totalMissions: dist.totalMissions
+      for (const trip of tripsToActivate) {
+        await this.activateTripAndAssignMissions(trip);
       }
-    });
-
-    await notificationService.sendTripActivationNotification({
-      tripId: trip.id,
-      tripName: trip.name
-    });
-
-    console.log(`✅ Trip "${trip.name}" activated`);
-  } catch (err) {
-    console.error('Trip activation error:', err);
-  }
-};
-
-// 🔁 Assign daily missions
-exports.assignDailyMissions = async () => {
-  try {
-    const activeTrips = await prisma.trip.findMany({
-      where: { status: 'ACTIVE', endDate: { gte: new Date() } },
-      include: { members: true, tripAliases: true }
-    });
-
-    for (const trip of activeTrips) {
-      await exports.checkDailyMissionAssignment(trip);
+    } catch (error) {
+      console.error('Error checking trips to activate:', error);
     }
-  } catch (err) {
-    console.error('Daily mission error:', err);
   }
-};
 
-// 📅 Check daily mission for each member
-exports.checkDailyMissionAssignment = async (trip) => {
-  try {
-    const start = new Date(trip.startDate);
-    const now = new Date();
-    const days = Math.floor((now - start) / (1000 * 60 * 60 * 24)) + 1;
-    const dist = calculateMissionDistribution(trip);
-    const expected = Math.min(days * dist.missionsPerUserPerDay, dist.missionsPerUser);
+  // Activate trip and assign initial missions
+  async activateTripAndAssignMissions(trip) {
+    try {
+      console.log(`🚀 Activating trip: ${trip.name}`);
+
+      // Calculate mission distribution according to DEV FILE algorithm
+      const missionDistribution = this.calculateMissionDistribution(trip);
+      
+      // Get mission templates based on trip theme
+      const missionTemplates = await this.getMissionTemplates(trip.theme, trip.tripMode);
+      
+      // Assign first day missions to all members
+      await this.assignInitialMissions(trip, missionTemplates, missionDistribution);
+      
+      // Update trip status
+      await prisma.trip.update({
+        where: { id: trip.id },
+        data: { 
+          status: 'ACTIVE',
+          totalMissions: missionDistribution.totalMissions
+        }
+      });
+
+      // Send activation notifications
+      await notificationService.sendTripActivationNotification({
+        tripId: trip.id,
+        tripName: trip.name
+      });
+
+      console.log(`✅ Trip "${trip.name}" activated with ${missionDistribution.totalMissions} total missions planned`);
+    } catch (error) {
+      console.error(`Error activating trip ${trip.id}:`, error);
+    }
+  }
+
+  // Calculate mission distribution according to DEV FILE algorithm
+  calculateMissionDistribution(trip) {
+    const N = trip.members.length; // Number of participants
+    const D = tripDurationDays(trip.startDate, trip.endDate); // Duration in days
+    
+    // Algorithm from DEV FILE:
+    // 1. Set base goal of 80-100 photos per trip
+    // 2. If N × D < 40, then X = 100, else X = 80
+    const X = (N * D < 40) ? 100 : 80; // Target number of photos
+    
+    // 3. M = ceil(X / N) → total missions per user
+    const M = Math.ceil(X / N);
+    
+    // 4. m = ceil(M / D) → missions per user per day
+    const m = Math.ceil(M / D);
+
+    return {
+      participantCount: N,
+      durationDays: D,
+      targetPhotos: X,
+      missionsPerUser: M,
+      missionsPerUserPerDay: m,
+      totalMissions: N * M
+    };
+  }
+
+  // Get mission templates based on theme and mode
+  async getMissionTemplates(theme, tripMode) {
+    const whereClause = {
+      isActive: true
+    };
+
+    if (tripMode === 'fun') {
+      // Fun mode: mix of aesthetic and secret agent (2/7 chance for fun missions)
+      whereClause.category = {
+        in: ['AESTHETIC', 'SECRET_AGENT']
+      };
+    } else {
+      // Normal mode: only aesthetic
+      whereClause.category = 'AESTHETIC';
+    }
+
+    const templates = await prisma.missionTemplate.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' }
+    });
+
+    if (templates.length === 0) {
+      throw new Error(`No mission templates found for theme: ${theme}, mode: ${tripMode}`);
+    }
+
+    return templates;
+  }
+
+  // Assign initial missions (first day)
+  async assignInitialMissions(trip, missionTemplates, distribution) {
+    const missions = [];
 
     for (const member of trip.members) {
-      const count = await prisma.assignedMission.count({
-        where: { userId: member.id, tripId: trip.id }
-      });
+      // Assign first day missions
+      const dailyMissions = this.selectMissionsForUser(
+        missionTemplates, 
+        distribution.missionsPerUserPerDay,
+        trip.tripMode
+      );
 
-      if (count < expected) {
-        const toAssign = expected - count;
-        await exports.assignAdditionalMissions(trip, member, toAssign);
+      for (const mission of dailyMissions) {
+        missions.push({
+          userId: member.id,
+          tripId: trip.id,
+          title: mission.title,
+          instruction: mission.instruction,
+          category: mission.category,
+          sampleImageUrl: mission.sampleImageUrl,
+          dayAssigned: 1,
+          createdAt: new Date()
+        });
       }
     }
-  } catch (err) {
-    console.error('Error checking daily mission:', err);
-  }
-};
 
-// ➕ Assign extra missions
-exports.assignAdditionalMissions = async (trip, member, count) => {
-  try {
-    const templates = await getMissionTemplates(trip.theme, trip.tripMode);
-    const selected = selectMissionsForUser(templates, count, trip.tripMode);
-
-    const missions = selected.map(m => ({
-      userId: member.id,
-      tripId: trip.id,
-      title: m.title,
-      instruction: m.instruction,
-      category: m.category,
-      sampleImageUrl: m.sampleImageUrl,
-      createdAt: new Date()
-    }));
-
-    await prisma.assignedMission.createMany({ data: missions });
-
-    const alias = trip.tripAliases.find(a => a.userId === member.id)?.alias || 'Agent';
-    await notificationService.sendMissionAssignedNotification({
-      userId: member.id,
-      missionTitle: `${count} nouvelle${count > 1 ? 's' : ''} mission${count > 1 ? 's' : ''}`,
-      tripName: trip.name,
-      alias
+    // Bulk create first day missions
+    await prisma.assignedMission.createMany({
+      data: missions
     });
 
-    console.log(`📋 Assigned ${count} missions to ${member.displayName}`);
-  } catch (err) {
-    console.error('Error assigning extra missions:', err);
-  }
-};
-
-// 👇 Manually trigger activation
-exports.manuallyActivateTrip = async (tripId, creatorId) => {
-  const trip = await prisma.trip.findUnique({
-    where: { id: tripId },
-    include: { members: true, tripAliases: true }
-  });
-
-  if (!trip || trip.creatorId !== creatorId) {
-    throw new Error('Unauthorized or not found');
-  }
-
-  if (trip.status !== 'UPCOMING') {
-    throw new Error('Trip is not upcoming');
-  }
-
-  await exports.activateTripAndAssignMissions(trip);
-  return trip;
-};
-
-// 📅 End completed trips
-exports.checkTripsToEnd = async () => {
-  try {
-    const now = new Date();
-    const trips = await prisma.trip.findMany({
-      where: { status: 'ACTIVE', endDate: { lt: now } }
-    });
-
-    for (const trip of trips) {
-      await exports.endTrip(trip);
+    // Send mission notifications to all members
+    for (const member of trip.members) {
+      const alias = trip.tripAliases.find(ta => ta.userId === member.id)?.alias || 'Agent';
+      await notificationService.sendMissionAssignedNotification({
+        userId: member.id,
+        missionTitle: `${distribution.missionsPerUserPerDay} nouvelle${distribution.missionsPerUserPerDay > 1 ? 's' : ''} mission${distribution.missionsPerUserPerDay > 1 ? 's' : ''}`,
+        tripName: trip.name,
+        alias
+      });
     }
-  } catch (err) {
-    console.error('Error checking trips to end:', err);
   }
-};
 
-// ✅ Finalize trip and generate album
-exports.endTrip = async (trip) => {
-  try {
-    console.log(`🏁 Ending trip: ${trip.name}`);
+  // Select missions for a specific user
+  selectMissionsForUser(templates, count, tripMode) {
+    let selectedMissions = [];
 
-    await prisma.trip.update({
-      where: { id: trip.id },
-      data: { status: 'COMPLETED' }
-    });
+    if (tripMode === 'fun') {
+      // Fun mode: 2/7 chance for secret agent missions
+      const aestheticMissions = templates.filter(t => t.category === 'AESTHETIC');
+      const secretAgentMissions = templates.filter(t => t.category === 'SECRET_AGENT');
+      
+      for (let i = 0; i < count; i++) {
+        // 2/7 chance for secret agent mission
+        const useSecretAgent = Math.random() < (2/7) && secretAgentMissions.length > 0;
+        
+        if (useSecretAgent) {
+          const randomIndex = Math.floor(Math.random() * secretAgentMissions.length);
+          selectedMissions.push(secretAgentMissions[randomIndex]);
+        } else if (aestheticMissions.length > 0) {
+          const randomIndex = Math.floor(Math.random() * aestheticMissions.length);
+          selectedMissions.push(aestheticMissions[randomIndex]);
+        }
+      }
+    } else {
+      // Normal mode: only aesthetic missions
+      selectedMissions = shuffleArray(templates).slice(0, count);
+    }
 
-    const completed = await prisma.assignedMission.count({
-      where: { tripId: trip.id, completed: true }
-    });
+    // If we don't have enough unique missions, allow repeats
+    while (selectedMissions.length < count) {
+      const randomMission = templates[Math.floor(Math.random() * templates.length)];
+      selectedMissions.push(randomMission);
+    }
 
-    await prisma.trip.update({
-      where: { id: trip.id },
-      data: { completedMissions: completed }
-    });
-
-    await albumService.generateTripAlbum(trip.id);
-
-    console.log(`✅ Trip "${trip.name}" completed`);
-  } catch (err) {
-    console.error(`Error ending trip: ${trip.id}`, err);
+    return selectedMissions;
   }
-};
+
+  // Assign daily missions (for already active trips)
+  async assignDailyMissions() {
+    try {
+      const activeTrips = await prisma.trip.findMany({
+        where: {
+          status: 'ACTIVE',
+          endDate: {
+            gte: new Date()
+          }
+        },
+        include: {
+          members: true,
+          tripAliases: true
+        }
+      });
+
+      for (const trip of activeTrips) {
+        await this.checkDailyMissionAssignment(trip);
+      }
+    } catch (error) {
+      console.error('Error assigning daily missions:', error);
+    }
+  }
+
+  // Check if daily missions need to be assigned for a trip
+  async checkDailyMissionAssignment(trip) {
+    try {
+      const tripStartDate = new Date(trip.startDate);
+      const now = new Date();
+      const daysSinceStart = Math.floor((now - tripStartDate) / (1000 * 60 * 60 * 24)) + 1;
+
+      const distribution = this.calculateMissionDistribution(trip);
+      const expectedMissionsPerUser = Math.min(
+        daysSinceStart * distribution.missionsPerUserPerDay,
+        distribution.missionsPerUser
+      );
+
+      // Check each member's mission count
+      for (const member of trip.members) {
+        const currentMissionCount = await prisma.assignedMission.count({
+          where: {
+            userId: member.id,
+            tripId: trip.id
+          }
+        });
+
+        if (currentMissionCount < expectedMissionsPerUser) {
+          const missionsNeeded = expectedMissionsPerUser - currentMissionCount;
+          await this.assignAdditionalMissions(trip, member, missionsNeeded, daysSinceStart);
+        }
+      }
+    } catch (error) {
+      console.error(`Error checking daily missions for trip ${trip.id}:`, error);
+    }
+  }
+
+  // Assign additional missions to a specific user
+  async assignAdditionalMissions(trip, member, count, dayNumber) {
+    try {
+      const missionTemplates = await this.getMissionTemplates(trip.theme, trip.tripMode);
+      const selectedMissions = this.selectMissionsForUser(missionTemplates, count, trip.tripMode);
+
+      const missions = selectedMissions.map(mission => ({
+        userId: member.id,
+        tripId: trip.id,
+        title: mission.title,
+        instruction: mission.instruction,
+        category: mission.category,
+        sampleImageUrl: mission.sampleImageUrl,
+        dayAssigned: dayNumber,
+        createdAt: new Date()
+      }));
+
+      await prisma.assignedMission.createMany({
+        data: missions
+      });
+
+      // Send notification
+      const alias = trip.tripAliases.find(ta => ta.userId === member.id)?.alias || 'Agent';
+      await notificationService.sendMissionAssignedNotification({
+        userId: member.id,
+        missionTitle: `${count} nouvelle${count > 1 ? 's' : ''} mission${count > 1 ? 's' : ''}`,
+        tripName: trip.name,
+        alias
+      });
+
+      console.log(`📋 Assigned ${count} additional missions to ${member.displayName} in trip ${trip.name}`);
+    } catch (error) {
+      console.error(`Error assigning additional missions:`, error);
+    }
+  }
+
+  // Check for trips that should end
+  async checkTripsToEnd() {
+    try {
+      const now = new Date();
+      const tripsToEnd = await prisma.trip.findMany({
+        where: {
+          status: 'ACTIVE',
+          endDate: {
+            lt: now
+          }
+        }
+      });
+
+      for (const trip of tripsToEnd) {
+        await this.endTrip(trip);
+      }
+    } catch (error) {
+      console.error('Error checking trips to end:', error);
+    }
+  }
+
+  // End a trip and trigger album generation
+  async endTrip(trip) {
+    try {
+      console.log(`🏁 Ending trip: ${trip.name}`);
+
+      // Count completed missions
+      const completedMissions = await prisma.assignedMission.count({
+        where: {
+          tripId: trip.id,
+          completed: true
+        }
+      });
+
+      // Update trip status
+      await prisma.trip.update({
+        where: { id: trip.id },
+        data: { 
+          status: 'COMPLETED',
+          completedMissions 
+        }
+      });
+
+      // Generate album (implement this later)
+      // const albumService = require('./album.service');
+      // await albumService.generateTripAlbum(trip.id);
+
+      console.log(`✅ Trip "${trip.name}" ended with ${completedMissions} completed missions`);
+    } catch (error) {
+      console.error(`Error ending trip ${trip.id}:`, error);
+    }
+  }
+
+  // Manual trip activation (for immediate activation)
+  async manuallyActivateTrip(tripId, creatorId) {
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        members: true,
+        tripAliases: true
+      }
+    });
+
+    if (!trip || trip.creatorId !== creatorId) {
+      throw new Error('Unauthorized or trip not found');
+    }
+
+    if (trip.status !== 'UPCOMING') {
+      throw new Error('Trip is not in upcoming status');
+    }
+
+    await this.activateTripAndAssignMissions(trip);
+    return trip;
+  }
+}
+
+// Export singleton instance
+module.exports = new MissionSchedulerService();

@@ -435,3 +435,55 @@ exports.sendMissionReminderNotification = async ({ userId, tripName, alias, pend
     throw error;
   }
 };
+
+// Send notification when someone joins a trip
+exports.sendMemberJoinedNotification = async ({ creatorId, newMemberName, tripName, alias, creatorName }) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: creatorId },
+      select: { fcmToken: true }
+    });
+
+    if (!user?.fcmToken) {
+      console.log('No FCM token found for trip creator');
+      return;
+    }
+
+    const message = {
+      token: user.fcmToken,
+      notification: {
+        title: '🎉 Nouvel agent rejoint !',
+        body: `${newMemberName} a rejoint "${tripName}" en tant que ${alias} !`
+      },
+      data: {
+        type: 'MEMBER_JOINED',
+        tripName,
+        newMemberName,
+        alias,
+        action: 'view_trip_members'
+      },
+      android: {
+        notification: {
+          icon: 'ic_notification',
+          color: '#4CAF50',
+          channelId: 'trip_updates'
+        }
+      },
+      apns: {
+        payload: {
+          aps: {
+            badge: 1,
+            sound: 'default'
+          }
+        }
+      }
+    };
+
+    const response = await messaging.send(message);
+    console.log('Member joined notification sent:', response);
+    return response;
+  } catch (error) {
+    console.error('Error sending member joined notification:', error);
+    throw error;
+  }
+};
