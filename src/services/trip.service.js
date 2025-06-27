@@ -341,17 +341,24 @@ exports.submitMissionPhoto = async ({ missionId, userId, photoUrl }) => {
 };
 
 // ✅ Get filtered trips by status (upcoming, active, completed)
+// src/services/trip.service.js
 exports.getTripsByStatus = async ({ userId, status }) => {
   const mappedStatus = {
     upcoming: 'UPCOMING',
     active: 'ACTIVE',
     completed: 'COMPLETED'
-  }[status.toLowerCase()] || status.toUpperCase();
+  }[status.toLowerCase()];
+
+  if (!mappedStatus) {
+    throw new Error('Invalid trip status');
+  }
 
   const trips = await prisma.trip.findMany({
     where: {
-      status: mappedStatus,
-      members: { some: { id: userId } }
+      status: mappedStatus, // ✅ Now a valid Prisma enum value
+      members: {
+        some: { id: userId }
+      }
     },
     include: {
       tripAliases: {
@@ -361,25 +368,67 @@ exports.getTripsByStatus = async ({ userId, status }) => {
       assignedMissions: {
         where: { userId },
         select: { completed: true }
+      },
+      creator: {
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true
+        }
+      },
+      members: {
+        select: {
+          id: true,
+          displayName: true,
+          email: true,
+          profilePhotoUrl: true
+        }
       }
     },
-    orderBy: { startDate: 'desc' }
+    orderBy: {
+      startDate: 'desc'
+    }
   });
 
   return trips.map(trip => {
     const totalMissions = trip.assignedMissions.length;
     const completedMissions = trip.assignedMissions.filter(m => m.completed).length;
+
+    const membersWithAliases = trip.members.map(member => {
+      const aliasInfo = trip.tripAliases.find(ta => ta.userId === member.id);
+      return {
+        id: member.id,
+        displayName: member.displayName,
+        email: member.email,
+        profilePhotoUrl: member.profilePhotoUrl,
+        alias: aliasInfo?.alias || null,
+        isCreator: member.id === trip.creator.id
+      };
+    });
+
     return {
       id: trip.id,
       name: trip.name,
+      theme: trip.theme,
+      description: trip.description,
       startDate: trip.startDate,
       endDate: trip.endDate,
-      theme: trip.theme,
+      status: trip.status,
+      tripMode: trip.tripMode,
+       code: trip.code,
+      creator: trip.creator,
+      memberCount: trip.members.length,
+      members: membersWithAliases,
       alias: trip.tripAliases[0]?.alias || null,
-      progress: { completed: completedMissions, total: totalMissions }
+      progress: {
+        completed: completedMissions,
+        total: totalMissions
+      }
     };
   });
 };
+
+
 
 // ✅ Get detailed trip info
 exports.getTripDetails = async ({ userId, tripId }) => {
