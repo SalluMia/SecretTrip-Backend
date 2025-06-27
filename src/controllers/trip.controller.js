@@ -14,16 +14,16 @@ exports.createTrip = async (req, res, next) => {
     }
 
     // Check if user has FCM token (for receiving join notifications)
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { fcmToken: true }
-    });
+    // const user = await prisma.user.findUnique({
+    //   where: { id: userId },
+    //   select: { fcmToken: true }
+    // });
 
-    if (!user.fcmToken) {
-      return errorResponse(res, 400, 
-        'Please enable notifications to receive join notifications from your friends'
-      );
-    }
+    // if (!user.fcmToken) {
+    //   return errorResponse(res, 400, 
+    //     'Please enable notifications to receive join notifications from your friends'
+    //   );
+    // }
 
     const data = await tripService.createTrip({ 
       userId, 
