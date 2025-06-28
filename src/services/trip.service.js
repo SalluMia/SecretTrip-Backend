@@ -5,12 +5,13 @@ const { prisma } = require('../config/prisma');
 const { generateCode } = require('../utils/generateCode');
 const { shuffleArray, tripDurationDays } = require('../utils/helpers');
 
-exports.createTrip = async ({ userId, name, theme, startDate, endDate, alias, tripMode = 'normal', description }) => {
+exports.createTrip = async ({ userId, name, theme,location, startDate, endDate, alias, tripMode = 'normal', description }) => {
   const code = generateCode(6);
   const trip = await prisma.trip.create({
     data: {
       name,
       theme,
+      location,
       startDate: new Date(startDate),
       endDate: new Date(endDate),
       status: 'UPCOMING',
@@ -91,6 +92,7 @@ exports.getTripByCodeWithDetails = async ({ code, userId }) => {
     name: trip.name,
     description: trip.description,
     theme: trip.theme,
+    location: trip.location,
     startDate: trip.startDate,
     endDate: trip.endDate,
     status: trip.status,

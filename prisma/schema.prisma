@@ -55,6 +55,7 @@ model Trip {
   name             String
   description      String?           // Optional trip description
   theme            String            // "AESTHETIC" or "SECRET_AGENT"
+  location         String @default("Unknown")
   code             String            @unique
   startDate        DateTime
   endDate          DateTime

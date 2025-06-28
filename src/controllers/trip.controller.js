@@ -7,9 +7,9 @@ const notificationService = require('../services/notification.service');
 exports.createTrip = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { name, theme, startDate, endDate, alias, description, tripMode = 'normal' } = req.body;
+    const { name, theme,location, startDate, endDate, alias, description, tripMode = 'normal' } = req.body;
 
-    if (!name || !theme || !startDate || !endDate || !alias || !description) {
+    if (!name || !theme || !location || !startDate || !endDate || !alias || !description) {
       return errorResponse(res, 400, 'All fields are required');
     }
 
@@ -29,6 +29,7 @@ exports.createTrip = async (req, res, next) => {
       userId, 
       name, 
       theme, 
+      location,
       startDate, 
       endDate, 
       alias, 
@@ -199,8 +200,10 @@ exports.getMyMissions = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { tripId } = req.params;
-
+    console.log('Userid', req.user.id)
+    console.log('TripId', req.params)
     const data = await tripService.getMyMissions({ userId, tripId });
+    console.log(data)
     successResponse(res, 200, 'Missions retrieved', data);
   } catch (err) {
     next(err);
