@@ -7,19 +7,37 @@ const admin = require('../config/firebase')
 // FCM Token validation function
 const validateFCMToken = async (fcmToken) => {
   try {
-    // Check if all required Firebase environment variables are set
-    if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
-      console.warn('⚠️ Firebase credentials not fully configured, skipping FCM validation');
+    // Skip validation if Firebase is not properly configured
+    if (!admin) {
+      console.warn('⚠️ Firebase Admin not configured, skipping FCM validation');
       return true; // Allow operation to continue
     }
 
-    // Validate FCM token format first
-    if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.length < 50) {
-      console.warn('⚠️ Invalid FCM token format');
+    // Check if all required Firebase environment variables are set
+    if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+      console.warn('⚠️ Firebase credentials incomplete, skipping FCM validation');
+      return true;
+    }
+
+    // Basic format validation for FCM tokens
+    if (!fcmToken || typeof fcmToken !== 'string') {
+      console.warn('⚠️ FCM token is missing or not a string');
       return false;
     }
 
-    // Check if Firebase Admin is initialized
+    // FCM tokens are typically 140+ characters
+    if (fcmToken.length < 50) {
+      console.warn('⚠️ FCM token too short (likely invalid format)');
+      return false;
+    }
+
+    // Skip actual Firebase validation in development with dummy tokens
+    if (fcmToken.startsWith('dummy_') || fcmToken.includes('test_token')) {
+      console.log('🧪 Development/test FCM token detected, skipping Firebase validation');
+      return true;
+    }
+
+    // Check if Firebase Admin is properly initialized
     if (!admin.apps || admin.apps.length === 0) {
       console.warn('⚠️ Firebase Admin not initialized, skipping FCM validation');
       return true;
@@ -44,25 +62,34 @@ const validateFCMToken = async (fcmToken) => {
     
     // Handle specific Firebase error codes
     switch (error.code) {
+      case 'app/invalid-credential':
+        console.error('🔑 Firebase credentials are invalid - check your service account JSON');
+        console.error('💡 Suggestion: Verify FIREBASE_PRIVATE_KEY format in .env file');
+        break;
+      case 'messaging/invalid-registration-token':
+      case 'messaging/registration-token-not-registered':
+        console.error('📱 FCM token is invalid or expired');
+        break;
       case 'messaging/mismatched-credential':
-        console.error('🔑 Firebase credentials mismatch - check project ID and service account');
+        console.error('🔑 Firebase credentials mismatch');
         break;
       case 'messaging/invalid-argument':
         console.error('📱 Invalid FCM token format or structure');
-        break;
-      case 'messaging/registration-token-not-registered':
-        console.error('📱 FCM token not registered (app may be uninstalled)');
-        break;
-      case 'messaging/invalid-registration-token':
-        console.error('📱 FCM token is malformed');
         break;
       default:
         console.error('🔥 Firebase error:', error.code || 'Unknown error');
     }
     
+    // Don't fail login for credential issues - just skip FCM
+    if (error.code === 'app/invalid-credential') {
+      console.warn('⚠️ Continuing without FCM due to credential issues');
+      return true;
+    }
+    
     return false;
   }
 };
+
 
 // Update FCM token for user
 const updateUserFCMToken = async (userId, fcmToken) => {
