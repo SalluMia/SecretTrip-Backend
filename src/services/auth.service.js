@@ -3,29 +3,63 @@ const bcrypt = require('bcryptjs');
 const { generateOTP, sendOTPEmail, sendPasswordResetEmail } = require('../utils/email');
 const crypto = require('crypto');
 const { sign } = require('../utils/jwt');
-
+const admin = require('../config/firebase')
 // FCM Token validation function
 const validateFCMToken = async (fcmToken) => {
   try {
-    // Only validate if Firebase Admin is available
-    if (process.env.FIREBASE_PROJECT_ID) {
-      const admin = require('firebase-admin');
-      
-      // Test if token is valid by creating a dry-run message
-      const message = {
-        token: fcmToken,
-        notification: {
-          title: 'Test',
-          body: 'Test message'
-        },
-        dryRun: true // This won't actually send the notification
-      };
-
-      await admin.messaging().send(message);
+    // Check if all required Firebase environment variables are set
+    if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+      console.warn('⚠️ Firebase credentials not fully configured, skipping FCM validation');
+      return true; // Allow operation to continue
     }
+
+    // Validate FCM token format first
+    if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.length < 50) {
+      console.warn('⚠️ Invalid FCM token format');
+      return false;
+    }
+
+    // Check if Firebase Admin is initialized
+    if (!admin.apps || admin.apps.length === 0) {
+      console.warn('⚠️ Firebase Admin not initialized, skipping FCM validation');
+      return true;
+    }
+
+    // Test if token is valid by creating a dry-run message
+    const message = {
+      token: fcmToken,
+      notification: {
+        title: 'Connection Test',
+        body: 'Validating FCM token'
+      }
+    };
+
+    // Use dry run to test without sending actual notification
+    await admin.messaging().send(message, true);
+    console.log('✅ FCM token validation successful');
     return true;
+
   } catch (error) {
-    console.error('FCM token validation failed:', error);
+    console.error('❌ FCM token validation failed:', error.message);
+    
+    // Handle specific Firebase error codes
+    switch (error.code) {
+      case 'messaging/mismatched-credential':
+        console.error('🔑 Firebase credentials mismatch - check project ID and service account');
+        break;
+      case 'messaging/invalid-argument':
+        console.error('📱 Invalid FCM token format or structure');
+        break;
+      case 'messaging/registration-token-not-registered':
+        console.error('📱 FCM token not registered (app may be uninstalled)');
+        break;
+      case 'messaging/invalid-registration-token':
+        console.error('📱 FCM token is malformed');
+        break;
+      default:
+        console.error('🔥 Firebase error:', error.code || 'Unknown error');
+    }
+    
     return false;
   }
 };
