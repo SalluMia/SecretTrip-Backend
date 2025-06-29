@@ -2,8 +2,7 @@
 const admin = require('firebase-admin');
 const { prisma } = require('../config/prisma');
 
-// Initialize Firebase Admin (add this to your main app.js or create a separate config file)
-// Make sure to set up your Firebase service account key
+// Initialize Firebase Admin - only if not already initialized
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
@@ -14,18 +13,302 @@ if (!admin.apps.length) {
   });
 }
 
-const messaging = admin.messaging();
+// ==================== DATABASE NOTIFICATION FUNCTIONS ====================
 
-// Store user FCM tokens (you'll need to add this to your user schema)
-// For now, I'll assume you have a way to get user's FCM token
+// Create notification in database (using NotificationHistory model)
+exports.createNotification = async ({ userId, title, body, type, data = {} }) => {
+  try {
+    const notification = await prisma.notificationHistory.create({
+      data: {
+        userId,
+        title,
+        body,
+        type,
+        data: data, // Already JSON in schema
+        read: false,
+        sentAt: new Date(),
+        success: true
+      }
+    });
+
+    return notification;
+  } catch (error) {
+    console.error('Error creating notification:', error);
+    throw error;
+  }
+};
+
+// Get user notifications with pagination (using NotificationHistory)
+exports.getUserNotifications = async ({ userId, page = 1, limit = 20 }) => {
+  try {
+    const skip = (page - 1) * limit;
+
+    const [notifications, totalCount] = await Promise.all([
+      prisma.notificationHistory.findMany({
+        where: { userId },
+        orderBy: { sentAt: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          title: true,
+          body: true,
+          type: true,
+          data: true,
+          read: true,
+          sentAt: true
+        }
+      }),
+      prisma.notificationHistory.count({
+        where: { userId }
+      })
+    ]);
+
+    // Format notifications with timeAgo
+    const formattedNotifications = notifications.map(notification => ({
+      ...notification,
+      isRead: notification.read, // Map 'read' to 'isRead' for consistency
+      createdAt: notification.sentAt, // Map 'sentAt' to 'createdAt' for consistency
+      timeAgo: getTimeAgo(notification.sentAt)
+    }));
+
+    return {
+      notifications: formattedNotifications,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalCount / limit),
+        totalCount,
+        hasMore: page * limit < totalCount
+      }
+    };
+  } catch (error) {
+    console.error('Error fetching user notifications:', error);
+    throw error;
+  }
+};
+
+// Get unread notification count (using NotificationHistory)
+exports.getUnreadNotificationCount = async (userId) => {
+  try {
+    const count = await prisma.notificationHistory.count({
+      where: {
+        userId,
+        read: false
+      }
+    });
+
+    return count;
+  } catch (error) {
+    console.error('Error getting unread count:', error);
+    throw error;
+  }
+};
+
+// Mark notification as read (using NotificationHistory)
+exports.markNotificationAsRead = async ({ notificationId, userId }) => {
+  try {
+    // Verify notification belongs to user
+    const notification = await prisma.notificationHistory.findFirst({
+      where: {
+        id: notificationId,
+        userId
+      }
+    });
+
+    if (!notification) {
+      throw new Error('Notification not found or access denied');
+    }
+
+    const updatedNotification = await prisma.notificationHistory.update({
+      where: { id: notificationId },
+      data: { 
+        read: true
+      }
+    });
+
+    return {
+      ...updatedNotification,
+      isRead: updatedNotification.read, // Map for consistency
+      readAt: new Date() // Add readAt for consistency
+    };
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    throw error;
+  }
+};
+
+// Mark all notifications as read (using NotificationHistory)
+exports.markAllNotificationsAsRead = async (userId) => {
+  try {
+    const result = await prisma.notificationHistory.updateMany({
+      where: {
+        userId,
+        read: false
+      },
+      data: {
+        read: true
+      }
+    });
+
+    return { updatedCount: result.count };
+  } catch (error) {
+    console.error('Error marking all notifications as read:', error);
+    throw error;
+  }
+};
+
+// Delete specific notification (using NotificationHistory)
+exports.deleteNotification = async ({ notificationId, userId }) => {
+  try {
+    // Verify notification belongs to user
+    const notification = await prisma.notificationHistory.findFirst({
+      where: {
+        id: notificationId,
+        userId
+      }
+    });
+
+    if (!notification) {
+      throw new Error('Notification not found or access denied');
+    }
+
+    await prisma.notificationHistory.delete({
+      where: { id: notificationId }
+    });
+
+    return { message: 'Notification deleted successfully' };
+  } catch (error) {
+    console.error('Error deleting notification:', error);
+    throw error;
+  }
+};
+
+// Delete all notifications for user (using NotificationHistory)
+exports.deleteAllUserNotifications = async (userId) => {
+  try {
+    const result = await prisma.notificationHistory.deleteMany({
+      where: { userId }
+    });
+
+    return { deletedCount: result.count };
+  } catch (error) {
+    console.error('Error deleting all notifications:', error);
+    throw error;
+  }
+};
+
+// Update user FCM token (Enhanced)
+exports.updateUserFCMToken = async ({ userId, fcmToken }) => {
+  try {
+    // Validate FCM token format (basic validation)
+    if (!fcmToken || fcmToken.length < 50) {
+      throw new Error('Invalid FCM token format');
+    }
+
+    // Check if token is already associated with another user
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        fcmToken: fcmToken,
+        id: { not: userId }
+      }
+    });
+
+    // If token exists for another user, remove it (device switched)
+    if (existingUser) {
+      await prisma.user.update({
+        where: { id: existingUser.id },
+        data: { fcmToken: null }
+      });
+      console.log(`Removed FCM token from user ${existingUser.id} (device switched)`);
+    }
+
+    // Update user's FCM token
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { 
+        fcmToken: fcmToken,
+        lastActive: new Date()
+      },
+      select: {
+        id: true,
+        displayName: true,
+        fcmToken: true
+      }
+    });
+
+    return updatedUser;
+  } catch (error) {
+    console.error('Error updating FCM token:', error);
+    throw error;
+  }
+};
+
+// Send test notification to user
+exports.sendTestNotificationToUser = async ({ userId, title, body, type }) => {
+  try {
+    // Create notification in database
+    await exports.createNotification({
+      userId,
+      title,
+      body,
+      type,
+      data: { test: true }
+    });
+
+    // Send FCM notification
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { fcmToken: true, displayName: true }
+    });
+
+    if (user?.fcmToken) {
+      const message = {
+        token: user.fcmToken,
+        notification: {
+          title,
+          body
+        },
+        data: {
+          type,
+          test: 'true',
+          timestamp: new Date().toISOString()
+        },
+        android: {
+          notification: {
+            icon: 'ic_notification',
+            color: '#667eea',
+            channelId: 'test_notifications'
+          }
+        },
+        apns: {
+          payload: {
+            aps: {
+              badge: 1,
+              sound: 'default'
+            }
+          }
+        }
+      };
+
+      const response = await admin.messaging().send(message);
+      console.log('Test notification sent successfully:', response);
+    }
+
+    return { success: true, message: 'Test notification sent' };
+  } catch (error) {
+    console.error('Error sending test notification:', error);
+    throw error;
+  }
+};
+
+// ==================== EXISTING FCM FUNCTIONS (UPDATED) ====================
 
 // Send notification for join request
 exports.sendJoinRequestNotification = async ({ creatorId, requesterName, tripName, alias }) => {
   try {
-    // Get creator's FCM token (you'll need to implement this)
     const creator = await prisma.user.findUnique({
       where: { id: creatorId },
-      select: { fcmToken: true, displayName: true } // Add fcmToken field to User model
+      select: { fcmToken: true, displayName: true }
     });
 
     if (!creator?.fcmToken) {
@@ -64,7 +347,7 @@ exports.sendJoinRequestNotification = async ({ creatorId, requesterName, tripNam
       }
     };
 
-    const response = await messaging.send(message);
+    const response = await admin.messaging().send(message);
     console.log('Join request notification sent:', response);
     return response;
   } catch (error) {
@@ -121,7 +404,7 @@ exports.sendRequestResponseNotification = async ({ userId, tripName, alias, appr
       }
     };
 
-    const response = await messaging.send(message);
+    const response = await admin.messaging().send(message);
     console.log('Request response notification sent:', response);
     return response;
   } catch (error) {
@@ -133,6 +416,20 @@ exports.sendRequestResponseNotification = async ({ userId, tripName, alias, appr
 // Send mission assignment notification
 exports.sendMissionAssignedNotification = async ({ userId, missionTitle, tripName, alias }) => {
   try {
+    // Create notification in database first
+    await exports.createNotification({
+      userId,
+      title: '🎯 Nouvelle mission secrète !',
+      body: `Agent ${alias}, tu as reçu une nouvelle mission : "${missionTitle}"`,
+      type: 'NEW_MISSION',
+      data: {
+        missionTitle,
+        tripName,
+        alias,
+        action: 'view_missions'
+      }
+    });
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { fcmToken: true }
@@ -173,7 +470,7 @@ exports.sendMissionAssignedNotification = async ({ userId, missionTitle, tripNam
       }
     };
 
-    const response = await messaging.send(message);
+    const response = await admin.messaging().send(message);
     console.log('Mission notification sent:', response);
     return response;
   } catch (error) {
@@ -201,6 +498,24 @@ exports.sendTripActivationNotification = async ({ tripId, tripName }) => {
 
     if (!trip) {
       throw new Error('Trip not found');
+    }
+
+    // Create notifications in database for all members
+    for (const member of trip.members) {
+      const alias = trip.tripAliases.find(ta => ta.userId === member.id)?.alias || 'Agent';
+      
+      await exports.createNotification({
+        userId: member.id,
+        title: '🚀 Mission activée !',
+        body: `Agent ${alias}, le voyage "${tripName}" a commencé ! Tes missions t'attendent.`,
+        type: 'TRIP_ACTIVATED',
+        data: {
+          tripId,
+          tripName,
+          alias,
+          action: 'view_missions'
+        }
+      });
     }
 
     const notifications = trip.members
@@ -236,7 +551,7 @@ exports.sendTripActivationNotification = async ({ tripId, tripName }) => {
       return;
     }
 
-    const response = await messaging.sendAll(notifications);
+    const response = await admin.messaging().sendAll(notifications);
     console.log(`Trip activation notifications sent: ${response.successCount}/${notifications.length}`);
     return response;
   } catch (error) {
@@ -245,7 +560,7 @@ exports.sendTripActivationNotification = async ({ tripId, tripName }) => {
   }
 };
 
-// Update user FCM token
+// Update user FCM token (Simple version for backward compatibility)
 exports.updateFCMToken = async ({ userId, fcmToken }) => {
   try {
     await prisma.user.update({
@@ -262,7 +577,7 @@ exports.updateFCMToken = async ({ userId, fcmToken }) => {
 // Send bulk notifications
 exports.sendBulkNotifications = async (notifications) => {
   try {
-    const response = await messaging.sendAll(notifications);
+    const response = await admin.messaging().sendAll(notifications);
     console.log(`Bulk notifications sent: ${response.successCount}/${notifications.length}`);
     
     // Handle failed notifications
@@ -274,9 +589,6 @@ exports.sendBulkNotifications = async (notifications) => {
           console.error('Failed to send to token:', notifications[idx].token, resp.error);
         }
       });
-      
-      // Optionally remove invalid tokens from database
-      // await this.removeInvalidTokens(failedTokens);
     }
     
     return response;
@@ -286,10 +598,23 @@ exports.sendBulkNotifications = async (notifications) => {
   }
 };
 
-
 // Send album ready notification
 exports.sendAlbumReadyNotification = async ({ userId, tripName, alias, albumId }) => {
   try {
+    // Create notification in database
+    await exports.createNotification({
+      userId,
+      title: '📸 Album de mission prêt !',
+      body: `Agent ${alias}, l'album de "${tripName}" est maintenant disponible !`,
+      type: 'ALBUM_READY',
+      data: {
+        tripName,
+        alias,
+        albumId,
+        action: 'view_album'
+      }
+    });
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { fcmToken: true }
@@ -330,7 +655,7 @@ exports.sendAlbumReadyNotification = async ({ userId, tripName, alias, albumId }
       }
     };
 
-    const response = await messaging.send(message);
+    const response = await admin.messaging().send(message);
     console.log('Album ready notification sent:', response);
     return response;
   } catch (error) {
@@ -342,6 +667,21 @@ exports.sendAlbumReadyNotification = async ({ userId, tripName, alias, albumId }
 // Send HD album available notification
 exports.sendHDAlbumAvailableNotification = async ({ userId, tripName, alias, purchaserName, albumId }) => {
   try {
+    // Create notification in database
+    await exports.createNotification({
+      userId,
+      title: '🌟 Album HD débloqué !',
+      body: `Agent ${alias}, ${purchaserName} a débloqué l'album HD de "${tripName}" pour toute l'équipe !`,
+      type: 'HD_ALBUM_AVAILABLE',
+      data: {
+        tripName,
+        alias,
+        purchaserName,
+        albumId,
+        action: 'view_hd_album'
+      }
+    });
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { fcmToken: true }
@@ -383,7 +723,7 @@ exports.sendHDAlbumAvailableNotification = async ({ userId, tripName, alias, pur
       }
     };
 
-    const response = await messaging.send(message);
+    const response = await admin.messaging().send(message);
     console.log('HD album available notification sent:', response);
     return response;
   } catch (error) {
@@ -395,6 +735,20 @@ exports.sendHDAlbumAvailableNotification = async ({ userId, tripName, alias, pur
 // Send mission completion reminder
 exports.sendMissionReminderNotification = async ({ userId, tripName, alias, pendingMissions }) => {
   try {
+    // Create notification in database
+    await exports.createNotification({
+      userId,
+      title: '⏰ Missions en attente',
+      body: `Agent ${alias}, tu as ${pendingMissions} mission${pendingMissions > 1 ? 's' : ''} en attente pour "${tripName}"`,
+      type: 'MISSION_REMINDER',
+      data: {
+        tripName,
+        alias,
+        pendingMissions,
+        action: 'view_missions'
+      }
+    });
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { fcmToken: true }
@@ -427,7 +781,7 @@ exports.sendMissionReminderNotification = async ({ userId, tripName, alias, pend
       }
     };
 
-    const response = await messaging.send(message);
+    const response = await admin.messaging().send(message);
     console.log('Mission reminder notification sent:', response);
     return response;
   } catch (error) {
@@ -436,9 +790,24 @@ exports.sendMissionReminderNotification = async ({ userId, tripName, alias, pend
   }
 };
 
-// Send notification when someone joins a trip
+// Send notification when someone joins a trip (Enhanced with DB storage)
 exports.sendMemberJoinedNotification = async ({ creatorId, newMemberName, tripName, alias, creatorName }) => {
   try {
+    // Create notification in database
+    await exports.createNotification({
+      userId: creatorId,
+      title: '🎉 Nouvel agent rejoint !',
+      body: `${newMemberName} a rejoint "${tripName}" en tant que ${alias} !`,
+      type: 'MEMBER_JOINED',
+      data: {
+        tripName,
+        newMemberName,
+        alias,
+        action: 'view_trip_members'
+      }
+    });
+
+    // Send FCM notification
     const user = await prisma.user.findUnique({
       where: { id: creatorId },
       select: { fcmToken: true }
@@ -479,7 +848,7 @@ exports.sendMemberJoinedNotification = async ({ creatorId, newMemberName, tripNa
       }
     };
 
-    const response = await messaging.send(message);
+    const response = await admin.messaging().send(message);
     console.log('Member joined notification sent:', response);
     return response;
   } catch (error) {
@@ -487,3 +856,20 @@ exports.sendMemberJoinedNotification = async ({ creatorId, newMemberName, tripNa
     throw error;
   }
 };
+
+// ==================== HELPER FUNCTIONS ====================
+
+// Helper function to calculate time ago
+function getTimeAgo(date) {
+  const now = new Date();
+  const diff = now - new Date(date);
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  return new Date(date).toLocaleDateString();
+}
