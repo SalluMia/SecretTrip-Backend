@@ -291,3 +291,106 @@ exports.getTripPhotos = async (tripId) => {
     photographerId: m.user.id
   }));
 };
+
+
+exports.getMissionDetail = async ({ userId, missionId }) => {
+  try {
+    // Get the mission with complete trip details
+    const mission = await prisma.assignedMission.findUnique({
+      where: { id: missionId },
+      include: {
+        trip: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            startDate: true,
+            endDate: true,
+            theme: true,
+            description: true,
+            createdAt: true,
+            members: {
+              select: {
+                id: true,
+                displayName: true,
+                profilePhotoUrl: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!mission) {
+      throw new Error('Mission not found');
+    }
+
+    // Verify user owns this mission
+    if (mission.userId !== userId) {
+      throw new Error('Unauthorized access to this mission');
+    }
+
+    // Get user's alias for this trip
+    const userAlias = await prisma.tripAlias.findUnique({
+      where: {
+        tripId_userId: {
+          tripId: mission.tripId,
+          userId: userId
+        }
+      },
+      select: {
+        alias: true
+      }
+    });
+
+    // Calculate trip duration and current day
+    const tripStartDate = new Date(mission.trip.startDate);
+    const tripEndDate = new Date(mission.trip.endDate);
+    const currentDate = new Date();
+    
+    const tripDuration = Math.ceil((tripEndDate - tripStartDate) / (1000 * 60 * 60 * 24));
+    const currentDay = mission.trip.status === 'ACTIVE' 
+      ? Math.max(1, Math.ceil((currentDate - tripStartDate) / (1000 * 60 * 60 * 24)))
+      : null;
+
+    // Return mission detail with complete trip information
+    return {
+      id: mission.id,
+      title: mission.title,
+      instruction: mission.instruction,
+      category: mission.category,
+      dayAssigned: mission.dayAssigned,
+      completed: mission.completed,
+      submitted: !!mission.photoUrl || !!mission.submittedAt,
+      photoUrl: mission.photoUrl,
+      thumbnailUrl: mission.thumbnailUrl,
+      sampleImageUrl: mission.sampleImageUrl,
+      caption: mission.caption,
+      createdAt: mission.createdAt,
+      submittedAt: mission.submittedAt,
+      
+      // Complete trip details
+      trip: {
+        id: mission.trip.id,
+        name: mission.trip.name,
+        description: mission.trip.description,
+        status: mission.trip.status,
+        theme: mission.trip.theme,
+        startDate: mission.trip.startDate,
+        endDate: mission.trip.endDate,
+        duration: tripDuration,
+        currentDay: currentDay,
+        createdAt: mission.trip.createdAt,
+        memberCount: mission.trip.members.length,
+        members: mission.trip.members
+      },
+      
+      // User's context in this trip
+      userAlias: userAlias?.alias || null
+    };
+
+  } catch (error) {
+    console.error('Error getting mission detail:', error);
+    throw error;
+  }
+};

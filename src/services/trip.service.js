@@ -125,9 +125,9 @@ exports.joinTripDirectly = async ({ userId, alias, code }) => {
     throw new Error('Trip not found');
   }
   
-  if (trip.status !== 'UPCOMING') {
-    throw new Error('Cannot join trip that has already started or ended');
-  }
+  // if (trip.status !== 'UPCOMING') {
+  //   throw new Error('Cannot join trip that has already started or ended');
+  // }
 
   // Check if already a member
   const isAlreadyMember = trip.members.some(member => member.id === userId);
@@ -140,6 +140,9 @@ exports.joinTripDirectly = async ({ userId, alias, code }) => {
   if (aliasTaken) {
     throw new Error('This alias is already taken for this trip');
   }
+
+  // ✅ NEW: Check for date conflicts with user's existing trips
+  await validateTripDateConflicts(userId, trip.startDate, trip.endDate, trip.name);
 
   // Add user to trip members
   await prisma.trip.update({
@@ -169,6 +172,167 @@ exports.joinTripDirectly = async ({ userId, alias, code }) => {
   };
 };
 
+// ✅ UPDATED: Allow sequential trips without strict "after all trips" rule
+const validateTripDateConflicts = async (userId, newTripStartDate, newTripEndDate, newTripName) => {
+  const userTrips = await prisma.trip.findMany({
+    where: {
+      members: {
+        some: { id: userId }
+      },
+      status: {
+        in: ['ACTIVE', 'UPCOMING']
+      }
+    },
+    select: {
+      id: true,
+      name: true,
+      startDate: true,
+      endDate: true,
+      status: true
+    },
+    orderBy: {
+      startDate: 'asc'
+    }
+  });
+
+  if (userTrips.length === 0) {
+    return true; // No existing trips, can join
+  }
+
+  const newStart = new Date(newTripStartDate);
+  const newEnd = new Date(newTripEndDate);
+
+  // Rule 1: Check for ANY date overlap with existing trips (this is the main rule)
+  const conflictingTrips = userTrips.filter(existingTrip => {
+    const existingStart = new Date(existingTrip.startDate);
+    const existingEnd = new Date(existingTrip.endDate);
+
+    // Check if dates overlap (including same dates or overlapping dates)
+    const hasOverlap = (newStart <= existingEnd) && (newEnd >= existingStart);
+    
+    return hasOverlap;
+  });
+
+  if (conflictingTrips.length > 0) {
+    const conflictDetails = conflictingTrips.map(trip => {
+      const startDate = new Date(trip.startDate).toLocaleDateString();
+      const endDate = new Date(trip.endDate).toLocaleDateString();
+      const status = trip.status === 'ACTIVE' ? 'Active' : 'Upcoming';
+      return `"${trip.name}" (${status}: ${startDate} - ${endDate})`;
+    }).join(', ');
+
+    throw new Error(
+      `Cannot join "${newTripName}" because its dates overlap with your existing trip(s): ${conflictDetails}. ` +
+      `Please choose dates that don't conflict with your current trips.`
+    );
+  }
+
+  // Rule 2: Find the best insertion point for the new trip
+  const sortedTrips = [...userTrips].sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+  
+  // Check if new trip can fit between existing trips or after all trips
+  let canInsert = false;
+  let suggestedSlots = [];
+
+  // Check if it can go before the first trip
+  if (sortedTrips.length > 0) {
+    const firstTripStart = new Date(sortedTrips[0].startDate);
+    if (newEnd < firstTripStart) {
+      canInsert = true;
+    }
+  }
+
+  // Check if it can fit between trips
+  for (let i = 0; i < sortedTrips.length - 1; i++) {
+    const currentTripEnd = new Date(sortedTrips[i].endDate);
+    const nextTripStart = new Date(sortedTrips[i + 1].startDate);
+    
+    if (newStart > currentTripEnd && newEnd < nextTripStart) {
+      canInsert = true;
+      break;
+    }
+    
+    // Calculate available slots for suggestions
+    const slotStart = new Date(currentTripEnd);
+    slotStart.setDate(slotStart.getDate() + 1);
+    const slotEnd = new Date(nextTripStart);
+    slotEnd.setDate(slotEnd.getDate() - 1);
+    
+    if (slotStart < slotEnd) {
+      suggestedSlots.push(`${slotStart.toLocaleDateString()} to ${slotEnd.toLocaleDateString()}`);
+    }
+  }
+
+  // Check if it can go after the last trip
+  if (sortedTrips.length > 0) {
+    const lastTripEnd = new Date(sortedTrips[sortedTrips.length - 1].endDate);
+    if (newStart > lastTripEnd) {
+      canInsert = true;
+    }
+    
+    // Add slot after last trip
+    const afterLastTrip = new Date(lastTripEnd);
+    afterLastTrip.setDate(afterLastTrip.getDate() + 1);
+    suggestedSlots.push(`${afterLastTrip.toLocaleDateString()} onwards`);
+  }
+
+  if (!canInsert) {
+    let suggestionMessage = '';
+    if (suggestedSlots.length > 0) {
+      suggestionMessage = ` Available time slots: ${suggestedSlots.join(', ')}.`;
+    }
+    
+    throw new Error(
+      `The trip "${newTripName}" cannot be scheduled during the requested dates. ` +
+      `Please choose dates that don't overlap with your existing trips.${suggestionMessage}`
+    );
+  }
+
+  return true; // All validations passed - trip can be inserted
+};
+
+// Helper function to check user's trip status
+const checkUserTripStatus = async (userId) => {
+  const userTrips = await prisma.trip.findMany({
+    where: {
+      members: {
+        some: { id: userId }
+      },
+      status: {
+        in: ['ACTIVE', 'UPCOMING']
+      }
+    },
+    select: {
+      id: true,
+      name: true,
+      startDate: true,
+      endDate: true,
+      status: true
+    },
+    orderBy: {
+      startDate: 'asc'
+    }
+  });
+
+  const activeTrip = userTrips.find(trip => trip.status === 'ACTIVE');
+  const upcomingTrips = userTrips.filter(trip => trip.status === 'UPCOMING');
+
+  let nextAvailableDate = new Date();
+  if (userTrips.length > 0) {
+    const latestEndDate = Math.max(...userTrips.map(trip => new Date(trip.endDate).getTime()));
+    nextAvailableDate = new Date(latestEndDate);
+    nextAvailableDate.setDate(nextAvailableDate.getDate() + 1);
+  }
+
+  return {
+    hasActiveTrip: !!activeTrip,
+    activeTrip,
+    upcomingTripsCount: upcomingTrips.length,
+    upcomingTrips,
+    nextAvailableDate,
+    canJoinNewTrip: true // Will be determined by validation
+  };
+};
 // Get trip members with aliases
 exports.getTripMembers = async ({ tripId, userId }) => {
   // Check if user is member or creator of the trip
@@ -295,10 +459,146 @@ exports.activateTrip = async ({ tripId, creatorId }) => {
 };
 
 exports.getMyMissions = async ({ tripId, userId }) => {
-  return await prisma.assignedMission.findMany({
-    where: { tripId, userId },
-    orderBy: { createdAt: 'asc' }
+  // First, verify user is a member of this trip
+  const trip = await prisma.trip.findFirst({
+    where: {
+      id: tripId,
+      members: {
+        some: { id: userId }
+      }
+    },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      startDate: true,
+      endDate: true
+    }
   });
+
+  if (!trip) {
+    throw new Error('Trip not found or you are not a member of this trip');
+  }
+
+  // Get user's alias for this trip
+  const userAlias = await prisma.tripAlias.findUnique({
+    where: {
+      tripId_userId: {
+        tripId,
+        userId
+      }
+    },
+    select: {
+      alias: true
+    }
+  });
+
+  // Get all missions for this user in this trip using ONLY available fields
+  const allMissions = await prisma.assignedMission.findMany({
+    where: { 
+      tripId, 
+      userId 
+    },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      userId: true,
+      tripId: true,
+      title: true,
+      instruction: true,
+      category: true,
+      sampleImageUrl: true,
+      photoUrl: true,
+      completed: true, // BOOLEAN NOT NULL DEFAULT false
+      submittedAt: true, // TIMESTAMP
+      createdAt: true, // TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      caption: true, // TEXT
+      dayAssigned: true, // INTEGER
+      thumbnailUrl: true // TEXT
+    }
+  });
+
+  // Separate missions using explicit boolean comparison
+  const completedMissions = allMissions.filter(mission => mission.completed === true);
+  const pendingMissions = allMissions.filter(mission => mission.completed === false);
+  
+  console.log(`📊 Mission breakdown for user ${userId}:`);
+  console.log(`   Total missions: ${allMissions.length}`);
+  console.log(`   Completed (true): ${completedMissions.length}`);
+  console.log(`   Pending (false): ${pendingMissions.length}`);
+  
+  // Get the next mission (first pending mission where completed is false)
+  const nextMission = pendingMissions.length > 0 ? pendingMissions[0] : null;
+
+  // Calculate mission statistics
+  const totalMissions = allMissions.length;
+  const completedCount = completedMissions.length;
+  const pendingCount = pendingMissions.length;
+  const completionPercentage = totalMissions > 0 ? Math.round((completedCount / totalMissions) * 100) : 0;
+
+  // Format missions with available fields only
+  const formatMission = (mission) => ({
+    id: mission.id,
+    title: mission.title,
+    instruction: mission.instruction,
+    category: mission.category,
+    completed: mission.completed, // Boolean true/false
+    submitted: !!mission.photoUrl || !!mission.submittedAt,
+    photoUrl: mission.photoUrl,
+    thumbnailUrl: mission.thumbnailUrl,
+    sampleImageUrl: mission.sampleImageUrl,
+    caption: mission.caption,
+    dayAssigned: mission.dayAssigned,
+    createdAt: mission.createdAt,
+    submittedAt: mission.submittedAt,
+    daysSinceCreated: mission.createdAt ? 
+      Math.floor((new Date() - new Date(mission.createdAt)) / (1000 * 60 * 60 * 24)) : null
+  });
+
+  // Format completed missions (only those with completed === true)
+  const formattedCompletedMissions = completedMissions.map(mission => {
+    const formatted = {
+      ...formatMission(mission),
+      // Calculate days since submission if available
+      daysSinceSubmitted: mission.submittedAt ? 
+        Math.floor((new Date() - new Date(mission.submittedAt)) / (1000 * 60 * 60 * 24)) : null
+    };
+    
+    // Log completed mission validation
+    console.log(`✅ Completed mission: "${mission.title}" - completed: ${mission.completed} (${typeof mission.completed})`);
+    
+    return formatted;
+  });
+
+  // Log next mission details
+  if (nextMission) {
+    console.log(`🎯 Next mission: "${nextMission.title}" - completed: ${nextMission.completed} (${typeof nextMission.completed})`);
+  } else {
+    console.log(`🎉 No pending missions - all completed!`);
+  }
+
+  return {
+    trip: {
+      id: trip.id,
+      name: trip.name,
+      status: trip.status,
+      startDate: trip.startDate,
+      endDate: trip.endDate
+    },
+    userAlias: userAlias?.alias || null,
+    missionSummary: {
+      total: totalMissions,
+      completed: completedCount,
+      pending: pendingCount,
+      completionPercentage
+    },
+    nextMission: nextMission ? {
+      ...formatMission(nextMission),
+      isNext: true,
+      priority: 'high'
+    } : null,
+    completedMissions: formattedCompletedMissions
+  };
 };
 
 exports.swapMission = async ({ missionId, userId }) => {

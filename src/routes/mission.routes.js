@@ -8,7 +8,7 @@ router.use(auth); // Protect all mission routes
 
 // Get user missions for a trip
 router.get('/trip/:tripId', missionController.getUserMissions);
-
+router.get('/:missionId', missionController.getMissionDetail);
 // Submit mission photo
 router.post('/:missionId/submit', 
   missionPhotoService.getUploadMiddleware(),

@@ -67,20 +67,20 @@ exports.joinTrip = async (req, res, next) => {
     const { code, alias } = req.body;
 
     if (!code || !alias) {
-      return errorResponse(res, 400, 'Code and alias are required');
+      return errorResponse(res, 400, 'Trip code and alias are required.');
     }
 
     // Validate alias format
     if (alias.length < 3 || alias.length > 20) {
-      return errorResponse(res, 400, 'Alias must be between 3 and 20 characters');
+      return errorResponse(res, 400, 'Alias must be between 3 and 20 characters.');
     }
 
     if (!/^[a-zA-ZÀ-ÿ0-9\s_-]+$/.test(alias)) {
-      return errorResponse(res, 400, 'Alias contains invalid characters');
+      return errorResponse(res, 400, 'Alias contains invalid characters. Only letters, numbers, spaces, hyphens, and underscores are allowed.');
     }
 
     const data = await tripService.joinTripDirectly({ userId, alias, code });
-    
+
     // Send notification to trip creator
     try {
       const [user, trip] = await Promise.all([
@@ -90,8 +90,8 @@ exports.joinTrip = async (req, res, next) => {
         }),
         prisma.trip.findUnique({
           where: { code },
-          select: { 
-            name: true, 
+          select: {
+            name: true,
             creatorId: true,
             creator: {
               select: {
@@ -113,14 +113,37 @@ exports.joinTrip = async (req, res, next) => {
       }
     } catch (notificationError) {
       console.error('Failed to send join notification:', notificationError);
-      // Don't fail the join if notification fails
+      // Do not block the response if notification fails
     }
 
     successResponse(res, 200, 'Successfully joined the trip!', data);
   } catch (err) {
+    // Handle expected validation errors
+    if (err.message.includes('active trip') || err.message.includes('conflict') || err.message.includes('sequential')) {
+      return errorResponse(res, 409, err.message);
+    }
+
+    if (err.message === 'Trip not found') {
+      return errorResponse(res, 404, 'Trip not found. Please check the trip code and try again.');
+    }
+
+    if (err.message === 'You cannot join a trip that has already started or ended') {
+      return errorResponse(res, 400, 'This trip has already started or ended. You can only join upcoming trips.');
+    }
+
+    if (err.message === 'You are already a member of this trip') {
+      return errorResponse(res, 409, 'You are already a member of this trip.');
+    }
+
+    if (err.message === 'This alias is already taken for this trip') {
+      return errorResponse(res, 409, 'This alias is already taken. Please choose another one.');
+    }
+
+    // Unhandled errors go to the global error handler
     next(err);
   }
 };
+
 
 // Check alias availability
 exports.checkAliasAvailability = async (req, res, next) => {
@@ -200,12 +223,45 @@ exports.getMyMissions = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { tripId } = req.params;
-    console.log('Userid', req.user.id)
-    console.log('TripId', req.params)
+    
+    // Enhanced logging
+    console.log(`🎯 Getting missions for User ID: ${userId}, Trip ID: ${tripId}`);
+    
+    // Validate tripId format (assuming UUID or specific format)
+    if (!tripId) {
+      return errorResponse(res, 400, 'Trip ID is required');
+    }
+
     const data = await tripService.getMyMissions({ userId, tripId });
-    console.log(data)
-    successResponse(res, 200, 'Missions retrieved', data);
+    
+    // Enhanced success logging
+    console.log(`✅ Retrieved ${data.missionSummary.total} missions for user ${userId} in trip "${data.trip.name}"`);
+    console.log(`📊 Mission Stats: ${data.missionSummary.completed} completed, ${data.missionSummary.pending} pending (${data.missionSummary.completionPercentage}% complete)`);
+    
+    if (data.nextMission) {
+      console.log(`🎯 Next mission: "${data.nextMission.title}"`);
+    } else {
+      console.log(`🎉 All missions completed for this trip!`);
+    }
+
+    // Create dynamic response message
+    let message = `Retrieved ${data.missionSummary.total} missions`;
+    if (data.nextMission) {
+      message += `, next: "${data.nextMission.title}"`;
+    }
+    if (data.missionSummary.completionPercentage === 100) {
+      message += ` - All missions completed! 🎉`;
+    }
+
+    successResponse(res, 200, message, data);
   } catch (err) {
+    console.error(`❌ Error getting missions for user ${req.user.id}, trip ${req.params.tripId}:`, err.message);
+    
+    // Handle specific errors
+    if (err.message.includes('Trip not found or you are not a member')) {
+      return errorResponse(res, 404, 'Trip not found or you do not have access to this trip');
+    }
+    
     next(err);
   }
 };

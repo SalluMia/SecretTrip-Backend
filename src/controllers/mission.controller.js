@@ -1,7 +1,7 @@
 // src/controllers/mission.controller.js
 const missionPhotoService = require('../services/missionPhoto.service');
 const { successResponse, errorResponse } = require('../utils/response');
-
+const  missionService =require('../services/missionPhoto.service')
 // Get user missions for a trip
 exports.getUserMissions = async (req, res, next) => {
   try {
@@ -110,6 +110,44 @@ exports.swapMission = async (req, res, next) => {
     
     successResponse(res, 200, 'Mission swapped successfully', data);
   } catch (err) {
+    next(err);
+  }
+};
+
+exports.getMissionDetail = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { missionId } = req.params;
+
+    console.log(`🎯 Getting mission detail for User ID: ${userId}, Mission ID: ${missionId}`);
+
+    if (!missionId) {
+      return errorResponse(res, 400, 'Mission ID is required');
+    }
+
+    const missionDetail = await missionService.getMissionDetail({ 
+      userId, 
+      missionId 
+    });
+
+    console.log(`✅ Mission detail retrieved: "${missionDetail.title}" - completed: ${missionDetail.completed}`);
+
+    const message = missionDetail.completed 
+      ? `Mission "${missionDetail.title}" completed`
+      : `Mission "${missionDetail.title}" pending`;
+
+    successResponse(res, 200, message, missionDetail);
+  } catch (err) {
+    console.error(`❌ Error getting mission detail for user ${req.user.id}, mission ${req.params.missionId}:`, err.message);
+    
+    if (err.message === 'Mission not found') {
+      return errorResponse(res, 404, 'Mission not found');
+    }
+    
+    if (err.message === 'Unauthorized access to this mission') {
+      return errorResponse(res, 403, 'You do not have access to this mission');
+    }
+    
     next(err);
   }
 };
