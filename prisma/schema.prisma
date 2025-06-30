@@ -35,12 +35,12 @@ model User {
   notificationPreferences Json?   @default("{\"tripRequests\": true, \"missionAssignments\": true, \"tripUpdates\": true}")
 
   // Relationships
-  tripsJoined       Trip[]            @relation("TripMembers")
-  assignedMissions  AssignedMission[]
-  payments          Payment[]
-  createdTrips      Trip[]            @relation("CreatedTrips")
-  joinRequests      JoinRequest[]
-  tripAliases       TripAlias[]
+  tripsJoined         Trip[]                @relation("TripMembers")
+  assignedMissions    AssignedMission[]
+  payments            Payment[]
+  createdTrips        Trip[]                @relation("CreatedTrips")
+  joinRequests        JoinRequest[]
+  tripAliases         TripAlias[]
   notificationHistory NotificationHistory[]
 
   createdAt DateTime @default(now())
@@ -51,25 +51,25 @@ model User {
 }
 
 model Trip {
-  id               String            @id @default(uuid())
-  name             String
-  description      String?           // Optional trip description
-  theme            String            // "AESTHETIC" or "SECRET_AGENT"
-  location         String @default("Unknown")
-  code             String            @unique
-  startDate        DateTime
-  endDate          DateTime
-  status           TripStatus        @default(UPCOMING)
-  tripMode         String            @default("normal") // normal | fun
-  
+  id          String     @id @default(uuid())
+  name        String
+  description String? // Optional trip description
+  theme       String // "AESTHETIC" or "SECRET_AGENT"
+  location    String     @default("Unknown")
+  code        String     @unique
+  startDate   DateTime
+  endDate     DateTime
+  status      TripStatus @default(UPCOMING)
+  tripMode    String     @default("normal") // normal | fun
+
   // Trip management
-  maxMembers       Int               @default(20)
-  isPublic         Boolean           @default(false)
-  
+  maxMembers Int     @default(20)
+  isPublic   Boolean @default(false)
+
   // Statistics
-  totalMissions    Int               @default(0)
-  completedMissions Int              @default(0)
-  
+  totalMissions     Int @default(0)
+  completedMissions Int @default(0)
+
   // Relationships
   creatorId        String
   creator          User              @relation("CreatedTrips", fields: [creatorId], references: [id])
@@ -103,17 +103,18 @@ model TripAlias {
 }
 
 model MissionTemplate {
-  id             String        @id @default(uuid())
-  title          String
-  instruction    String
-  location       String?
-  sampleImageUrl String?
-  category       MissionType?  // AESTHETIC or SECRET_AGENT
-  level          MissionLevel  @default(NORMAL)
-  isActive       Boolean       @default(true) // For enabling/disabling missions
-  
+  id               String            @id @default(uuid())
+  title            String
+  instruction      String
+  location         String?
+  sampleImageUrl   String?
+  category         MissionType? // AESTHETIC or SECRET_AGENT
+  level            MissionLevel      @default(NORMAL)
+  isActive         Boolean           @default(true) // For enabling/disabling missions
+  assignedMissions AssignedMission[] // 👈 Add this
+
   createdAt DateTime @default(now())
- updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@index([category])
   @@index([level])
@@ -121,53 +122,57 @@ model MissionTemplate {
 }
 
 model AssignedMission {
-  id             String    @id @default(uuid())
-  userId         String
-  tripId         String
+  id     String @id @default(uuid())
+  userId String
+  tripId String
+
+  missionTemplateId String?
+
   title          String
   instruction    String
   category       String
   sampleImageUrl String?
   photoUrl       String?
-  thumbnailUrl   String?   // Add this
-  caption        String?   // Add this
-  dayAssigned    Int?      // Add this - which day of the trip
+  thumbnailUrl   String? // Add this
+  caption        String? // Add this
+  dayAssigned    Int? // Add this - which day of the trip
   completed      Boolean   @default(false)
   submittedAt    DateTime?
   createdAt      DateTime  @default(now())
-  
-  user User @relation(fields: [userId], references: [id])
-  trip Trip @relation(fields: [tripId], references: [id])
+
+  user            User             @relation(fields: [userId], references: [id])
+  trip            Trip             @relation(fields: [tripId], references: [id])
+  missionTemplate MissionTemplate? @relation(fields: [missionTemplateId], references: [id])
 
   @@index([userId, tripId])
   @@index([tripId, completed])
   @@index([completed])
   @@index([submittedAt])
-  @@index([dayAssigned])  // Add this index
+  @@index([dayAssigned]) // Add this index
 }
 
 model Album {
-  id        String   @id @default(uuid())
-  tripId    String   @unique
+  id        String    @id @default(uuid())
+  tripId    String    @unique
   pdfUrl    String
   pdfHDUrl  String?
-  printed   Boolean  @default(false)
+  printed   Boolean   @default(false)
   expiresAt DateTime? // When free access expires
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   trip Trip @relation(fields: [tripId], references: [id])
 }
 
 model Payment {
-  id        String   @id @default(uuid())
-  userId    String
-  tripId    String
-  type      String   // "album_hd" or "album_print"
-  amount    Int      // Amount in cents
-  currency  String   @default("EUR")
-  status    String   // "pending", "completed", "failed", "refunded"
+  id                    String   @id @default(uuid())
+  userId                String
+  tripId                String
+  type                  String // "album_hd" or "album_print"
+  amount                Int // Amount in cents
+  currency              String   @default("EUR")
+  status                String // "pending", "completed", "failed", "refunded"
   stripePaymentIntentId String? // Stripe payment ID
-  timestamp DateTime @default(now())
+  timestamp             DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
   trip Trip @relation(fields: [tripId], references: [id])
@@ -190,9 +195,9 @@ model JoinRequest {
   userId    String
   alias     String
   status    String   @default("pending") // pending | approved | rejected
-  message   String?  // Optional message from user
+  message   String? // Optional message from user
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   user User @relation(fields: [userId], references: [id])
   trip Trip @relation(fields: [tripId], references: [id])
@@ -203,22 +208,22 @@ model JoinRequest {
 }
 
 model Package {
-  id        String   @id @default(uuid())
+  id        String        @id @default(uuid())
   name      String
   price     Float
   features  String[] // store as a string array
   status    PackageStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 }
 
 model PrivacyPolicy {
-  id         String   @id @default(uuid())
-  contentEn  String?   // English content
-  contentFr  String?   // French content
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid())
+  contentEn String? // English content
+  contentFr String? // French content
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("privacy_policies")
 }
@@ -227,14 +232,14 @@ model PrivacyPolicy {
 model NotificationHistory {
   id      String   @id @default(uuid())
   userId  String
-  type    String   // "JOIN_REQUEST", "REQUEST_APPROVED", "NEW_MISSION", etc.
+  type    String // "JOIN_REQUEST", "REQUEST_APPROVED", "NEW_MISSION", etc.
   title   String
   body    String
-  data    Json?    // Additional notification data
+  data    Json? // Additional notification data
   sentAt  DateTime @default(now())
   read    Boolean  @default(false)
   success Boolean  @default(true)
-  error   String?  // Error message if sending failed
+  error   String? // Error message if sending failed
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

@@ -35,13 +35,17 @@ exports.getHomeData = async (userId) => {
 
     // Get all active missions for this trip (not just today's)
     activeMissions = await prisma.assignedMission.findMany({
-      where: {
-        tripId: activeTrip.id,
-        userId,
-        completed: false
-      },
-      orderBy: { createdAt: 'asc' }
-    });
+  where: {
+    tripId: activeTrip.id,
+    userId,
+    completed: false
+  },
+  include: {
+    missionTemplate: true
+  },
+  orderBy: { createdAt: 'asc' }
+});
+
 
     // Calculate current day
     const now = new Date();
@@ -126,14 +130,23 @@ exports.getHomeData = async (userId) => {
     // Active Trip Section (displayed at top)
     activeTrip: activeTripData,
     alias: userAlias,
-    activeMissions: activeMissions.map(m => ({
-      id: m.id,
-      title: m.title,
-      instruction: m.instruction,
-      submitted: !!m.photoUrl,
-      critical: Math.random() < 0.3, // You can replace this with actual logic
-      createdAt: m.createdAt
-    })),
+   activeMissions: activeMissions.map(m => ({
+  id: m.id,
+  title: m.missionTemplate?.title,
+  instruction: m.missionTemplate?.instruction,
+  sampleImageUrl: m.missionTemplate?.sampleImageUrl,
+  level: m.missionTemplate?.level,
+  location: m.missionTemplate?.location,
+  category: m.missionTemplate?.category,
+  createdAt: m.missionTemplate?.createdAt,
+  updatedAt: m.missionTemplate?.updatedAt,
+  isActive: m.missionTemplate?.isActive,
+  submitted: !!m.photoUrl,
+  thumbnailUrl: m.thumbnailUrl,
+  caption: m.caption,
+  dayAssigned: m.dayAssigned,
+})),
+
     
     // Upcoming Trips Section (instead of today's missions)
     upcomingTrips: formattedUpcomingTrips
