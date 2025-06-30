@@ -111,7 +111,9 @@ model MissionTemplate {
   category         MissionType? // AESTHETIC or SECRET_AGENT
   level            MissionLevel      @default(NORMAL)
   isActive         Boolean           @default(true) // For enabling/disabling missions
-  assignedMissions AssignedMission[] // 👈 Add this
+  
+  // Relationship to assigned missions
+  assignedMissions AssignedMission[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -126,29 +128,29 @@ model AssignedMission {
   userId String
   tripId String
 
-  missionTemplateId String?
+  // 🔗 ONLY REFERENCE TO TEMPLATE - No duplicate data
+  missionTemplateId String // Made required since every mission should have a template
 
-  title          String
-  instruction    String
-  category       String
-  sampleImageUrl String?
-  photoUrl       String?
-  thumbnailUrl   String? // Add this
-  caption        String? // Add this
-  dayAssigned    Int? // Add this - which day of the trip
-  completed      Boolean   @default(false)
-  submittedAt    DateTime?
-  createdAt      DateTime  @default(now())
+  // ✅ KEEP: Mission-specific data (user's interaction with the mission)
+  photoUrl     String? // User's submitted photo
+  thumbnailUrl String? // User's submitted photo thumbnail
+  caption      String? // User's caption for their photo
+  dayAssigned  Int? // Which day of the trip this was assigned
+  completed    Boolean   @default(false)
+  submittedAt  DateTime?
+  createdAt    DateTime  @default(now())
 
-  user            User             @relation(fields: [userId], references: [id])
-  trip            Trip             @relation(fields: [tripId], references: [id])
-  missionTemplate MissionTemplate? @relation(fields: [missionTemplateId], references: [id])
+  // Relationships
+  user            User           @relation(fields: [userId], references: [id])
+  trip            Trip           @relation(fields: [tripId], references: [id])
+  missionTemplate MissionTemplate @relation(fields: [missionTemplateId], references: [id])
 
   @@index([userId, tripId])
   @@index([tripId, completed])
   @@index([completed])
   @@index([submittedAt])
-  @@index([dayAssigned]) // Add this index
+  @@index([dayAssigned])
+  @@index([missionTemplateId]) // Index for template lookups
 }
 
 model Album {

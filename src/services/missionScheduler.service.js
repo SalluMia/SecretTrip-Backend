@@ -1,4 +1,4 @@
-// src/services/missionScheduler.service.js
+// src/services/missionScheduler.service.js - UPDATED WITH MISSION TEMPLATE RELATION
 const { prisma } = require('../config/prisma');
 const { shuffleArray, tripDurationDays } = require('../utils/helpers');
 const notificationService = require('./notification.service');
@@ -144,7 +144,7 @@ class MissionSchedulerService {
     return templates;
   }
 
-  // Assign initial missions (first day)
+  // ✅ FIXED: Assign initial missions with proper template relationship
   async assignInitialMissions(trip, missionTemplates, distribution) {
     const missions = [];
 
@@ -156,17 +156,15 @@ class MissionSchedulerService {
         trip.tripMode
       );
 
-      for (const mission of dailyMissions) {
-        missions.push({
-          userId: member.id,
-          tripId: trip.id,
-          title: mission.title,
-          instruction: mission.instruction,
-          category: mission.category,
-          sampleImageUrl: mission.sampleImageUrl,
-          dayAssigned: 1,
-          createdAt: new Date()
-        });
+      for (const missionTemplate of dailyMissions) {
+       missions.push({
+        userId: member.id,
+        tripId: trip.id,
+        missionTemplateId: missionTemplate.id,
+        dayAssigned: 1,
+        createdAt: new Date()
+      });
+
       }
     }
 
@@ -278,19 +276,20 @@ class MissionSchedulerService {
     }
   }
 
-  // Assign additional missions to a specific user
+  // ✅ FIXED: Assign additional missions with proper template relationship
   async assignAdditionalMissions(trip, member, count, dayNumber) {
     try {
       const missionTemplates = await this.getMissionTemplates(trip.theme, trip.tripMode);
       const selectedMissions = this.selectMissionsForUser(missionTemplates, count, trip.tripMode);
 
-      const missions = selectedMissions.map(mission => ({
+      const missions = selectedMissions.map(missionTemplate => ({
         userId: member.id,
         tripId: trip.id,
-        title: mission.title,
-        instruction: mission.instruction,
-        category: mission.category,
-        sampleImageUrl: mission.sampleImageUrl,
+        missionTemplateId: missionTemplate.id, // ✅ PROPER TEMPLATE REFERENCE
+        title: missionTemplate.title,
+        instruction: missionTemplate.instruction,
+        category: missionTemplate.category,
+        sampleImageUrl: missionTemplate.sampleImageUrl,
         dayAssigned: dayNumber,
         createdAt: new Date()
       }));
@@ -308,9 +307,9 @@ class MissionSchedulerService {
         alias
       });
 
-      console.log(`📋 Assigned ${count} additional missions to ${member.displayName} in trip ${trip.name}`);
+      console.log(`✅ Assigned ${count} missions to ${member.displayName} for day ${dayNumber}`);
     } catch (error) {
-      console.error(`Error assigning additional missions:`, error);
+      console.error(`Error assigning missions to ${member.id}:`, error);
     }
   }
 
@@ -335,60 +334,22 @@ class MissionSchedulerService {
     }
   }
 
-  // End a trip and trigger album generation
+  // End a trip
   async endTrip(trip) {
     try {
-      console.log(`🏁 Ending trip: ${trip.name}`);
-
-      // Count completed missions
-      const completedMissions = await prisma.assignedMission.count({
-        where: {
-          tripId: trip.id,
-          completed: true
-        }
-      });
-
-      // Update trip status
       await prisma.trip.update({
         where: { id: trip.id },
-        data: { 
-          status: 'COMPLETED',
-          completedMissions 
-        }
+        data: { status: 'COMPLETED' }
       });
 
-      // Generate album (implement this later)
-      // const albumService = require('./album.service');
-      // await albumService.generateTripAlbum(trip.id);
-
-      console.log(`✅ Trip "${trip.name}" ended with ${completedMissions} completed missions`);
+      console.log(`🏁 Trip "${trip.name}" has been completed`);
+      
+      // Generate album could be triggered here
+      // await albumService.generateAlbum(trip.id);
     } catch (error) {
       console.error(`Error ending trip ${trip.id}:`, error);
     }
   }
-
-  // Manual trip activation (for immediate activation)
-  async manuallyActivateTrip(tripId, creatorId) {
-    const trip = await prisma.trip.findUnique({
-      where: { id: tripId },
-      include: {
-        members: true,
-        tripAliases: true
-      }
-    });
-
-    if (!trip || trip.creatorId !== creatorId) {
-      throw new Error('Unauthorized or trip not found');
-    }
-
-    if (trip.status !== 'UPCOMING') {
-      throw new Error('Trip is not in upcoming status');
-    }
-
-    await this.activateTripAndAssignMissions(trip);
-    return trip;
-  }
 }
 
-// Export singleton instance
 module.exports = new MissionSchedulerService();

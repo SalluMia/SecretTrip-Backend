@@ -153,26 +153,233 @@ exports.getUserMissions = async ({ userId, tripId, status = null }) => {
 
   const missions = await prisma.assignedMission.findMany({
     where,
-    include: { trip: true },
-    orderBy: { createdAt: 'asc' }
+    include: { 
+      trip: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          theme: true,
+          tripMode: true
+        }
+      },
+      // ✅ INCLUDE MISSION TEMPLATE DATA
+      missionTemplate: {
+        select: {
+          id: true,
+          title: true,
+          instruction: true,
+          category: true,
+          level: true,
+          location: true,
+          sampleImageUrl: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      }
+    },
+    orderBy: [
+      { dayAssigned: 'asc' },
+      { createdAt: 'asc' }
+    ]
   });
 
   return missions.map(m => ({
+    // Assigned Mission Data
     id: m.id,
-    title: m.title,
-    instruction: m.instruction,
-    category: m.category,
-    sampleImageUrl: m.sampleImageUrl,
+    userId: m.userId,
+    tripId: m.tripId,
+    completed: m.completed,
     photoUrl: m.photoUrl,
     thumbnailUrl: m.thumbnailUrl,
     caption: m.caption,
-    completed: m.completed,
+    dayAssigned: m.dayAssigned,
     submittedAt: m.submittedAt,
     createdAt: m.createdAt,
+    
+    // Mission Template Data (priority given to template, fallback to assigned mission)
+    missionTemplateId: m.missionTemplateId,
+    title: m.missionTemplate?.title || m.title,
+    instruction: m.missionTemplate?.instruction || m.instruction,
+    category: m.missionTemplate?.category || m.category,
+    sampleImageUrl: m.missionTemplate?.sampleImageUrl || m.sampleImageUrl,
+    level: m.missionTemplate?.level || 'NORMAL',
+    location: m.missionTemplate?.location,
+    
+    // Trip Data
     tripName: m.trip.name,
     tripStatus: m.trip.status,
-    canSubmit: m.trip.status === 'ACTIVE' && !m.completed
+    tripTheme: m.trip.theme,
+    tripMode: m.trip.tripMode,
+    
+    // Complete Mission Template Object
+    missionTemplate: m.missionTemplate ? {
+      id: m.missionTemplate.id,
+      title: m.missionTemplate.title,
+      instruction: m.missionTemplate.instruction,
+      category: m.missionTemplate.category,
+      level: m.missionTemplate.level,
+      location: m.missionTemplate.location,
+      sampleImageUrl: m.missionTemplate.sampleImageUrl,
+      isActive: m.missionTemplate.isActive,
+      createdAt: m.missionTemplate.createdAt,
+      updatedAt: m.missionTemplate.updatedAt
+    } : null,
+    
+    // Computed fields
+    canSubmit: m.trip.status === 'ACTIVE' && !m.completed,
+    submitted: !!m.photoUrl || !!m.submittedAt,
+    canSwap: m.trip.status === 'ACTIVE' && !m.completed
   }));
+};
+
+// Enhanced getMissionDetail WITH MISSION TEMPLATE DATA
+exports.getMissionDetail = async ({ userId, missionId }) => {
+  try {
+    // Get the mission with complete trip details AND mission template
+    const mission = await prisma.assignedMission.findUnique({
+      where: { id: missionId },
+      include: {
+        trip: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            startDate: true,
+            endDate: true,
+            theme: true,
+            tripMode: true,
+            description: true,
+            createdAt: true,
+            members: {
+              select: {
+                id: true,
+                displayName: true,
+                profilePhotoUrl: true
+              }
+            }
+          }
+        },
+        // ✅ INCLUDE MISSION TEMPLATE DATA
+        missionTemplate: {
+          select: {
+            id: true,
+            title: true,
+            instruction: true,
+            category: true,
+            level: true,
+            location: true,
+            sampleImageUrl: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true
+          }
+        }
+      }
+    });
+
+    if (!mission) {
+      throw new Error('Mission not found');
+    }
+
+    // Verify user owns this mission
+    if (mission.userId !== userId) {
+      throw new Error('Unauthorized access to this mission');
+    }
+
+    // Get user's alias for this trip
+    const userAlias = await prisma.tripAlias.findUnique({
+      where: {
+        tripId_userId: {
+          tripId: mission.tripId,
+          userId: userId
+        }
+      },
+      select: {
+        alias: true
+      }
+    });
+
+    // Calculate trip duration and current day
+    const tripStartDate = new Date(mission.trip.startDate);
+    const tripEndDate = new Date(mission.trip.endDate);
+    const currentDate = new Date();
+    
+    const tripDuration = Math.ceil((tripEndDate - tripStartDate) / (1000 * 60 * 60 * 24));
+    const currentDay = mission.trip.status === 'ACTIVE' 
+      ? Math.max(1, Math.ceil((currentDate - tripStartDate) / (1000 * 60 * 60 * 24)))
+      : null;
+
+    // Return mission detail with complete trip information AND mission template
+    return {
+      // Assigned Mission Data
+      id: mission.id,
+      userId: mission.userId,
+      tripId: mission.tripId,
+      completed: mission.completed,
+      photoUrl: mission.photoUrl,
+      thumbnailUrl: mission.thumbnailUrl,
+      caption: mission.caption,
+      dayAssigned: mission.dayAssigned,
+      createdAt: mission.createdAt,
+      submittedAt: mission.submittedAt,
+      
+      // Mission Template Data (priority given to template, fallback to assigned mission)
+      missionTemplateId: mission.missionTemplateId,
+      title: mission.missionTemplate?.title || mission.title,
+      instruction: mission.missionTemplate?.instruction || mission.instruction,
+      category: mission.missionTemplate?.category || mission.category,
+      sampleImageUrl: mission.missionTemplate?.sampleImageUrl || mission.sampleImageUrl,
+      level: mission.missionTemplate?.level || 'NORMAL',
+      location: mission.missionTemplate?.location,
+      
+      // Complete Mission Template Object
+      missionTemplate: mission.missionTemplate ? {
+        id: mission.missionTemplate.id,
+        title: mission.missionTemplate.title,
+        instruction: mission.missionTemplate.instruction,
+        category: mission.missionTemplate.category,
+        level: mission.missionTemplate.level,
+        location: mission.missionTemplate.location,
+        sampleImageUrl: mission.missionTemplate.sampleImageUrl,
+        isActive: mission.missionTemplate.isActive,
+        createdAt: mission.missionTemplate.createdAt,
+        updatedAt: mission.missionTemplate.updatedAt
+      } : null,
+      
+      // Complete trip details
+      trip: {
+        id: mission.trip.id,
+        name: mission.trip.name,
+        description: mission.trip.description,
+        status: mission.trip.status,
+        theme: mission.trip.theme,
+        tripMode: mission.trip.tripMode,
+        startDate: mission.trip.startDate,
+        endDate: mission.trip.endDate,
+        duration: tripDuration,
+        currentDay: currentDay,
+        createdAt: mission.trip.createdAt,
+        memberCount: mission.trip.members.length,
+        members: mission.trip.members
+      },
+      
+      // User's context in this trip
+      userAlias: userAlias?.alias || null,
+      
+      // Computed fields
+      submitted: !!mission.photoUrl || !!mission.submittedAt,
+      canSubmit: mission.trip.status === 'ACTIVE' && !mission.completed,
+      canSwap: mission.trip.status === 'ACTIVE' && !mission.completed,
+      canEdit: mission.userId === userId && !mission.completed,
+      isOverdue: mission.dayAssigned && currentDay ? currentDay > mission.dayAssigned : false
+    };
+
+  } catch (error) {
+    console.error('Error getting mission detail:', error);
+    throw error;
+  }
 };
 
 // 🔁 Retake mission photo
@@ -293,104 +500,3 @@ exports.getTripPhotos = async (tripId) => {
 };
 
 
-exports.getMissionDetail = async ({ userId, missionId }) => {
-  try {
-    // Get the mission with complete trip details
-    const mission = await prisma.assignedMission.findUnique({
-      where: { id: missionId },
-      include: {
-        trip: {
-          select: {
-            id: true,
-            name: true,
-            status: true,
-            startDate: true,
-            endDate: true,
-            theme: true,
-            description: true,
-            createdAt: true,
-            members: {
-              select: {
-                id: true,
-                displayName: true,
-                profilePhotoUrl: true
-              }
-            }
-          }
-        }
-      }
-    });
-
-    if (!mission) {
-      throw new Error('Mission not found');
-    }
-
-    // Verify user owns this mission
-    if (mission.userId !== userId) {
-      throw new Error('Unauthorized access to this mission');
-    }
-
-    // Get user's alias for this trip
-    const userAlias = await prisma.tripAlias.findUnique({
-      where: {
-        tripId_userId: {
-          tripId: mission.tripId,
-          userId: userId
-        }
-      },
-      select: {
-        alias: true
-      }
-    });
-
-    // Calculate trip duration and current day
-    const tripStartDate = new Date(mission.trip.startDate);
-    const tripEndDate = new Date(mission.trip.endDate);
-    const currentDate = new Date();
-    
-    const tripDuration = Math.ceil((tripEndDate - tripStartDate) / (1000 * 60 * 60 * 24));
-    const currentDay = mission.trip.status === 'ACTIVE' 
-      ? Math.max(1, Math.ceil((currentDate - tripStartDate) / (1000 * 60 * 60 * 24)))
-      : null;
-
-    // Return mission detail with complete trip information
-    return {
-      id: mission.id,
-      title: mission.title,
-      instruction: mission.instruction,
-      category: mission.category,
-      dayAssigned: mission.dayAssigned,
-      completed: mission.completed,
-      submitted: !!mission.photoUrl || !!mission.submittedAt,
-      photoUrl: mission.photoUrl,
-      thumbnailUrl: mission.thumbnailUrl,
-      sampleImageUrl: mission.sampleImageUrl,
-      caption: mission.caption,
-      createdAt: mission.createdAt,
-      submittedAt: mission.submittedAt,
-      
-      // Complete trip details
-      trip: {
-        id: mission.trip.id,
-        name: mission.trip.name,
-        description: mission.trip.description,
-        status: mission.trip.status,
-        theme: mission.trip.theme,
-        startDate: mission.trip.startDate,
-        endDate: mission.trip.endDate,
-        duration: tripDuration,
-        currentDay: currentDay,
-        createdAt: mission.trip.createdAt,
-        memberCount: mission.trip.members.length,
-        members: mission.trip.members
-      },
-      
-      // User's context in this trip
-      userAlias: userAlias?.alias || null
-    };
-
-  } catch (error) {
-    console.error('Error getting mission detail:', error);
-    throw error;
-  }
-};

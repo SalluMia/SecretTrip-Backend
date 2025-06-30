@@ -5,6 +5,7 @@ const { successResponse, errorResponse } = require('../utils/response');
 // Complete user profile
 exports.completeProfile = async (req, res, next) => {
   try {
+    console.log('hit')
     const userId = req.user.id;
     const { travelInterests } = req.body;
     console.log('photo', req.file)

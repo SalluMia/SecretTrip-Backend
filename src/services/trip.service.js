@@ -493,29 +493,16 @@ exports.getMyMissions = async ({ tripId, userId }) => {
     }
   });
 
-  // Get all missions for this user in this trip using ONLY available fields
+  // ✅ FIXED: Get all missions WITH mission template information
   const allMissions = await prisma.assignedMission.findMany({
     where: { 
       tripId, 
       userId 
     },
-    orderBy: { createdAt: 'asc' },
-    select: {
-      id: true,
-      userId: true,
-      tripId: true,
-      title: true,
-      instruction: true,
-      category: true,
-      sampleImageUrl: true,
-      photoUrl: true,
-      completed: true, // BOOLEAN NOT NULL DEFAULT false
-      submittedAt: true, // TIMESTAMP
-      createdAt: true, // TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-      caption: true, // TEXT
-      dayAssigned: true, // INTEGER
-      thumbnailUrl: true // TEXT
-    }
+    include: {
+      missionTemplate: true // ✅ INCLUDE TEMPLATE RELATION
+    },
+    orderBy: { createdAt: 'asc' }
   });
 
   // Separate missions using explicit boolean comparison
@@ -536,43 +523,52 @@ exports.getMyMissions = async ({ tripId, userId }) => {
   const pendingCount = pendingMissions.length;
   const completionPercentage = totalMissions > 0 ? Math.round((completedCount / totalMissions) * 100) : 0;
 
-  // Format missions with available fields only
+  // ✅ FIXED: Format missions with BOTH assigned mission data AND template data
   const formatMission = (mission) => ({
+    // Assigned Mission Data
     id: mission.id,
-    title: mission.title,
-    instruction: mission.instruction,
-    category: mission.category,
-    completed: mission.completed, // Boolean true/false
-    submitted: !!mission.photoUrl || !!mission.submittedAt,
+    completed: mission.completed,
     photoUrl: mission.photoUrl,
     thumbnailUrl: mission.thumbnailUrl,
-    sampleImageUrl: mission.sampleImageUrl,
     caption: mission.caption,
     dayAssigned: mission.dayAssigned,
     createdAt: mission.createdAt,
     submittedAt: mission.submittedAt,
+    
+    // Mission Template Data (priority given to template if available)
+    missionTemplateId: mission.missionTemplateId,
+    title: mission.missionTemplate?.title || mission.title,
+    instruction: mission.missionTemplate?.instruction || mission.instruction,
+    category: mission.missionTemplate?.category || mission.category,
+    sampleImageUrl: mission.missionTemplate?.sampleImageUrl || mission.sampleImageUrl,
+    level: mission.missionTemplate?.level,
+    location: mission.missionTemplate?.location,
+    isActive: mission.missionTemplate?.isActive,
+    
+    // Computed fields
+    submitted: !!mission.photoUrl || !!mission.submittedAt,
     daysSinceCreated: mission.createdAt ? 
-      Math.floor((new Date() - new Date(mission.createdAt)) / (1000 * 60 * 60 * 24)) : null
+      Math.floor((new Date() - new Date(mission.createdAt)) / (1000 * 60 * 60 * 24)) : null,
+    
+    // Full template data for reference
+    missionTemplate: mission.missionTemplate
   });
 
-  // Format completed missions (only those with completed === true)
+  // Format completed missions
   const formattedCompletedMissions = completedMissions.map(mission => {
     const formatted = {
       ...formatMission(mission),
-      // Calculate days since submission if available
       daysSinceSubmitted: mission.submittedAt ? 
         Math.floor((new Date() - new Date(mission.submittedAt)) / (1000 * 60 * 60 * 24)) : null
     };
     
-    // Log completed mission validation
-    console.log(`✅ Completed mission: "${mission.title}" - completed: ${mission.completed} (${typeof mission.completed})`);
-    
+    console.log(`✅ Completed mission: "${mission.missionTemplate?.title || mission.title}" - Template ID: ${mission.missionTemplateId}`);
     return formatted;
   });
 
   // Log next mission details
   if (nextMission) {
-    console.log(`🎯 Next mission: "${nextMission.title}" - completed: ${nextMission.completed} (${typeof nextMission.completed})`);
+    console.log(`🎯 Next mission: "${nextMission.missionTemplate?.title || nextMission.title}" - Template ID: ${nextMission.missionTemplateId}`);
   } else {
     console.log(`🎉 No pending missions - all completed!`);
   }
@@ -601,45 +597,151 @@ exports.getMyMissions = async ({ tripId, userId }) => {
   };
 };
 
+// ✅ FIXED: Swap mission with proper template handling
 exports.swapMission = async ({ missionId, userId }) => {
-  const mission = await prisma.assignedMission.findUnique({ where: { id: missionId } });
+  const mission = await prisma.assignedMission.findUnique({ 
+    where: { id: missionId },
+    include: { missionTemplate: true }
+  });
+  
   if (!mission || mission.userId !== userId || mission.completed) {
     throw new Error('Cannot swap this mission');
   }
 
-  const others = await prisma.missionTemplate.findMany({
+  // Get available templates of same category, excluding current one
+  const availableTemplates = await prisma.missionTemplate.findMany({
     where: {
-      category: mission.category,
-      NOT: { title: mission.title }
+      category: mission.missionTemplate?.category || mission.category,
+      isActive: true,
+      NOT: { 
+        id: mission.missionTemplateId 
+      }
     }
   });
 
-  const newOne = others[Math.floor(Math.random() * others.length)];
+  if (availableTemplates.length === 0) {
+    throw new Error('No alternative missions available for this category');
+  }
 
+  const newTemplate = availableTemplates[Math.floor(Math.random() * availableTemplates.length)];
+
+  // ✅ Update with new template reference
   return await prisma.assignedMission.update({
     where: { id: missionId },
     data: {
-      title: newOne.title,
-      instruction: newOne.instruction,
-      sampleImageUrl: newOne.sampleImageUrl
+      missionTemplateId: newTemplate.id, // ✅ UPDATE TEMPLATE REFERENCE
+      title: newTemplate.title,
+      instruction: newTemplate.instruction,
+      category: newTemplate.category,
+      sampleImageUrl: newTemplate.sampleImageUrl
+    },
+    include: {
+      missionTemplate: true // ✅ RETURN WITH TEMPLATE DATA
     }
   });
 };
 
-exports.submitMissionPhoto = async ({ missionId, userId, photoUrl }) => {
-  const mission = await prisma.assignedMission.findUnique({ where: { id: missionId } });
+// ✅ Submit mission photo (no changes needed, but included for completeness)
+exports.submitMissionPhoto = async ({ missionId, userId, photoUrl, caption }) => {
+  const mission = await prisma.assignedMission.findUnique({ 
+    where: { id: missionId },
+    include: { missionTemplate: true }
+  });
+  
   if (!mission || mission.userId !== userId || mission.completed) {
-    throw new Error('Invalid or already completed');
+    throw new Error('Invalid or already completed mission');
   }
 
   return await prisma.assignedMission.update({
     where: { id: missionId },
     data: {
       photoUrl,
+      caption: caption || null,
       completed: true,
       submittedAt: new Date()
+    },
+    include: {
+      missionTemplate: true // ✅ RETURN WITH TEMPLATE DATA
     }
   });
+};
+
+// ✅ FIXED: Get all trip missions with template information
+exports.getTripMissions = async ({ tripId, userId }) => {
+  // Verify user access
+  const trip = await prisma.trip.findFirst({
+    where: {
+      id: tripId,
+      members: { some: { id: userId } }
+    }
+  });
+
+  if (!trip) {
+    throw new Error('Trip not found or access denied');
+  }
+
+  // Get all missions for the trip with template data
+  const missions = await prisma.assignedMission.findMany({
+    where: { tripId },
+    include: {
+      user: {
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true
+        }
+      },
+      missionTemplate: true // ✅ INCLUDE TEMPLATE RELATION
+    },
+    orderBy: [
+      { dayAssigned: 'asc' },
+      { createdAt: 'asc' }
+    ]
+  });
+
+  // Group missions by user
+  const missionsByUser = missions.reduce((acc, mission) => {
+    const userId = mission.userId;
+    if (!acc[userId]) {
+      acc[userId] = {
+        user: mission.user,
+        missions: []
+      };
+    }
+    
+    // ✅ Format with template data
+    acc[userId].missions.push({
+      id: mission.id,
+      missionTemplateId: mission.missionTemplateId,
+      title: mission.missionTemplate?.title || mission.title,
+      instruction: mission.missionTemplate?.instruction || mission.instruction,
+      category: mission.missionTemplate?.category || mission.category,
+      level: mission.missionTemplate?.level,
+      sampleImageUrl: mission.missionTemplate?.sampleImageUrl || mission.sampleImageUrl,
+      photoUrl: mission.photoUrl,
+      caption: mission.caption,
+      completed: mission.completed,
+      dayAssigned: mission.dayAssigned,
+      submittedAt: mission.submittedAt,
+      createdAt: mission.createdAt,
+      missionTemplate: mission.missionTemplate // ✅ FULL TEMPLATE DATA
+    });
+    
+    return acc;
+  }, {});
+
+  return {
+    trip: {
+      id: trip.id,
+      name: trip.name,
+      status: trip.status,
+      startDate: trip.startDate,
+      endDate: trip.endDate
+    },
+    missionsByUser,
+    totalMissions: missions.length,
+    completedMissions: missions.filter(m => m.completed).length
+  };
 };
 
 // ✅ Get filtered trips by status (upcoming, active, completed)

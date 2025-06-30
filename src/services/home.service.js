@@ -1,7 +1,13 @@
+// src/services/home.service.js - Simplified version: Active trip + missions & Upcoming trips only
+
 const { prisma } = require('../config/prisma');
 
 exports.getHomeData = async (userId) => {
-  // Get active trip with its missions
+  let activeTripData = null;
+  let activeMissions = [];
+  let userAlias = null;
+
+  // Get active trip
   const activeTrip = await prisma.trip.findFirst({
     where: {
       members: { some: { id: userId } },
@@ -18,10 +24,6 @@ exports.getHomeData = async (userId) => {
     }
   });
 
-  let activeTripData = null;
-  let userAlias = null;
-  let activeMissions = [];
-
   if (activeTrip) {
     // Get user's alias for this trip
     const alias = await prisma.tripAlias.findUnique({
@@ -33,31 +35,46 @@ exports.getHomeData = async (userId) => {
       }
     });
 
-    // Get all active missions for this trip (not just today's)
+    // Get active missions WITH mission template relationship
     activeMissions = await prisma.assignedMission.findMany({
-  where: {
-    tripId: activeTrip.id,
-    userId,
-    completed: false
-  },
-  include: {
-    missionTemplate: true
-  },
-  orderBy: { createdAt: 'asc' }
-});
+      where: {
+        tripId: activeTrip.id,
+        userId: userId,
+        completed: false
+      },
+      include: {
+        missionTemplate: {
+          select: {
+            id: true,
+            title: true,
+            instruction: true,
+            category: true,
+            level: true,
+            location: true,
+            sampleImageUrl: true,
+            isActive: true
+          }
+        }
+      },
+      orderBy: [
+        { dayAssigned: 'asc' },
+        { createdAt: 'asc' }
+      ]
+    });
 
-
-    // Calculate current day
+    // Calculate current day of trip
+    const tripStartDate = new Date(activeTrip.startDate);
     const now = new Date();
-    const start = new Date(activeTrip.startDate);
-    const currentDay = Math.floor((now - start) / (1000 * 60 * 60 * 24)) + 1;
+    const currentDay = Math.floor((now - tripStartDate) / (1000 * 60 * 60 * 24)) + 1;
 
     activeTripData = {
       id: activeTrip.id,
-      name: activeTrip.name,
+      title: activeTrip.name,
       theme: activeTrip.theme,
+      tripMode: activeTrip.tripMode,
       startDate: activeTrip.startDate,
       endDate: activeTrip.endDate,
+      status: activeTrip.status,
       currentDay: currentDay > 0 ? currentDay : 1,
       members: activeTrip.members,
       memberCount: activeTrip.members.length
@@ -66,34 +83,25 @@ exports.getHomeData = async (userId) => {
     userAlias = alias?.alias;
   }
 
-  // Get upcoming trips (trips that user is member of but haven't started yet)
+  // Get upcoming trips
   const upcomingTrips = await prisma.trip.findMany({
-  where: {
-    members: { some: { id: userId } },
-    status: 'UPCOMING',
-    // startDate: {
-    //   gte: new Date(new Date().toDateString()) // Include today's date
-    // }
-  },
-  include: {
-    members: {
-      select: {
-        id: true,
-        displayName: true,
-        profilePhotoUrl: true
+    where: {
+      members: { some: { id: userId } },
+      status: 'UPCOMING'
+    },
+    include: {
+      members: {
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true
+        }
       }
     },
-    _count: {
-      select: {
-        assignedMissions: true
-      }
-    }
-  },
-  orderBy: { startDate: 'asc' }
-});
+    orderBy: { startDate: 'asc' }
+  });
 
-
-  // Format upcoming trips with complete information
+  // Format upcoming trips
   const formattedUpcomingTrips = await Promise.all(
     upcomingTrips.map(async (trip) => {
       // Get user's alias for this trip
@@ -113,42 +121,51 @@ exports.getHomeData = async (userId) => {
         id: trip.id,
         title: trip.name,
         theme: trip.theme,
+        tripMode: trip.tripMode,
         startDate: trip.startDate,
         endDate: trip.endDate,
+        status: trip.status,
         daysUntilStart,
         alias: tripAlias?.alias || null,
         members: trip.members,
-        memberCount: trip.members.length,
-        totalMissions: trip._count.assignedMissions,
-        type: 'UPCOMING',
-        duration: Math.ceil((new Date(trip.endDate) - new Date(trip.startDate)) / (1000 * 60 * 60 * 24))
+        memberCount: trip.members.length
       };
     })
   );
 
   return {
-    // Active Trip Section (displayed at top)
+    // Active Trip Section
     activeTrip: activeTripData,
     alias: userAlias,
-   activeMissions: activeMissions.map(m => ({
-  id: m.id,
-  title: m.missionTemplate?.title,
-  instruction: m.missionTemplate?.instruction,
-  sampleImageUrl: m.missionTemplate?.sampleImageUrl,
-  level: m.missionTemplate?.level,
-  location: m.missionTemplate?.location,
-  category: m.missionTemplate?.category,
-  createdAt: m.missionTemplate?.createdAt,
-  updatedAt: m.missionTemplate?.updatedAt,
-  isActive: m.missionTemplate?.isActive,
-  submitted: !!m.photoUrl,
-  thumbnailUrl: m.thumbnailUrl,
-  caption: m.caption,
-  dayAssigned: m.dayAssigned,
-})),
-
     
-    // Upcoming Trips Section (instead of today's missions)
+    // Active missions with mission template information
+    activeMissions: activeMissions.map(mission => ({
+      // Assigned Mission Data
+      id: mission.id,
+      userId: mission.userId,
+      tripId: mission.tripId,
+      completed: mission.completed,
+      photoUrl: mission.photoUrl,
+      thumbnailUrl: mission.thumbnailUrl,
+      caption: mission.caption,
+      dayAssigned: mission.dayAssigned,
+      createdAt: mission.createdAt,
+      submittedAt: mission.submittedAt,
+      
+      // Mission Template Data (priority given to template, fallback to assigned mission fields)
+      missionTemplateId: mission.missionTemplateId,
+      title: mission.missionTemplate?.title || mission.title,
+      instruction: mission.missionTemplate?.instruction || mission.instruction,
+      category: mission.missionTemplate?.category || mission.category,
+      sampleImageUrl: mission.missionTemplate?.sampleImageUrl || mission.sampleImageUrl,
+      level: mission.missionTemplate?.level || 'NORMAL',
+      location: mission.missionTemplate?.location,
+      
+      // Complete Mission Template Object (if available)
+      missionTemplate: mission.missionTemplate
+    })),
+
+    // Upcoming Trips Section
     upcomingTrips: formattedUpcomingTrips
   };
 };
