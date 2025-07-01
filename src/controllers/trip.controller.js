@@ -233,7 +233,7 @@ exports.getMyMissions = async (req, res, next) => {
     }
 
     const data = await tripService.getMyMissions({ userId, tripId });
-    
+     console.log(data,'my missions')
     // Enhanced success logging
     console.log(`✅ Retrieved ${data.missionSummary.total} missions for user ${userId} in trip "${data.trip.name}"`);
     console.log(`📊 Mission Stats: ${data.missionSummary.completed} completed, ${data.missionSummary.pending} pending (${data.missionSummary.completionPercentage}% complete)`);
@@ -258,9 +258,9 @@ exports.getMyMissions = async (req, res, next) => {
     console.error(`❌ Error getting missions for user ${req.user.id}, trip ${req.params.tripId}:`, err.message);
     
     // Handle specific errors
-    if (err.message.includes('Trip not found or you are not a member')) {
-      return errorResponse(res, 404, 'Trip not found or you do not have access to this trip');
-    }
+    // if (err.message.includes('Trip not found or you are not a member')) {
+    //   return errorResponse(res, 404, 'Trip not found or you do not have access to this trip');
+    // }
     
     next(err);
   }

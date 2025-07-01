@@ -1,7 +1,8 @@
-// src/services/missionScheduler.service.js - UPDATED WITH MISSION TEMPLATE RELATION
+// src/services/missionScheduler.service.js - FIXED VERSION
 const { prisma } = require('../config/prisma');
 const { shuffleArray, tripDurationDays } = require('../utils/helpers');
 const notificationService = require('./notification.service');
+const albumService = require('./album.service');
 const cron = require('node-cron');
 
 class MissionSchedulerService {
@@ -11,8 +12,8 @@ class MissionSchedulerService {
 
   // Start the cron job to check for trips that should begin
   startScheduler() {
-    // Run every hour to check for trips that should start
-    cron.schedule('0 * * * *', async () => {
+    // Run every 30 minutes to check for trips that should start
+    cron.schedule('*/30 * * * *', async () => {
       console.log('🕒 Checking for trips to activate...');
       await this.checkAndActivateTrips();
     });
@@ -30,16 +31,26 @@ class MissionSchedulerService {
     });
   }
 
-  // Check for trips that should be activated (start date reached)
+  // ✅ FIXED: Check for trips that should be activated (start date reached)
   async checkAndActivateTrips() {
     try {
       const now = new Date();
+      
+      // Set the time to start of day for comparison to avoid timezone issues
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      
+      console.log(`🔍 Checking trips that should start today: ${today.toISOString()}`);
+
       const tripsToActivate = await prisma.trip.findMany({
         where: {
           status: 'UPCOMING',
-          startDate: {
-            lte: now
-          }
+          AND: [
+            {
+              startDate: {
+                lte: now // Trip start date is today or earlier
+              }
+            }
+          ]
         },
         include: {
           members: true,
@@ -47,24 +58,46 @@ class MissionSchedulerService {
         }
       });
 
+      console.log(`📋 Found ${tripsToActivate.length} trips to potentially activate`);
+
       for (const trip of tripsToActivate) {
-        await this.activateTripAndAssignMissions(trip);
+        const tripStartDate = new Date(trip.startDate);
+        const tripStartDay = new Date(tripStartDate.getFullYear(), tripStartDate.getMonth(), tripStartDate.getDate());
+        
+        console.log(`🚀 Trip "${trip.name}": Start date is ${tripStartDay.toISOString()}, Today is ${today.toISOString()}`);
+        
+        // Only activate if the trip start date is today or has passed
+        if (tripStartDay <= today) {
+          await this.activateTripAndAssignMissions(trip);
+        } else {
+          console.log(`⏳ Trip "${trip.name}" not ready to activate yet`);
+        }
       }
     } catch (error) {
       console.error('Error checking trips to activate:', error);
     }
   }
 
-  // Activate trip and assign initial missions
+  // ✅ FIXED: Activate trip and assign initial missions with proper mission distribution
   async activateTripAndAssignMissions(trip) {
     try {
-      console.log(`🚀 Activating trip: ${trip.name}`);
+      console.log(`🚀 Activating trip: ${trip.name} (ID: ${trip.id})`);
 
       // Calculate mission distribution according to DEV FILE algorithm
       const missionDistribution = this.calculateMissionDistribution(trip);
       
+      console.log(`📊 Mission distribution for "${trip.name}":`, {
+        participants: missionDistribution.participantCount,
+        duration: missionDistribution.durationDays,
+        targetPhotos: missionDistribution.targetPhotos,
+        missionsPerUser: missionDistribution.missionsPerUser,
+        missionsPerUserPerDay: missionDistribution.missionsPerUserPerDay,
+        totalMissions: missionDistribution.totalMissions
+      });
+      
       // Get mission templates based on trip theme
       const missionTemplates = await this.getMissionTemplates(trip.theme, trip.tripMode);
+      console.log(`🎯 Found ${missionTemplates.length} mission templates for theme: ${trip.theme}, mode: ${trip.tripMode}`);
       
       // Assign first day missions to all members
       await this.assignInitialMissions(trip, missionTemplates, missionDistribution);
@@ -84,16 +117,18 @@ class MissionSchedulerService {
         tripName: trip.name
       });
 
-      console.log(`✅ Trip "${trip.name}" activated with ${missionDistribution.totalMissions} total missions planned`);
+      console.log(`✅ Trip "${trip.name}" activated successfully with ${missionDistribution.totalMissions} total missions planned`);
     } catch (error) {
-      console.error(`Error activating trip ${trip.id}:`, error);
+      console.error(`❌ Error activating trip ${trip.id}:`, error);
     }
   }
 
-  // Calculate mission distribution according to DEV FILE algorithm
+  // ✅ FIXED: Calculate mission distribution according to DEV FILE algorithm
   calculateMissionDistribution(trip) {
     const N = trip.members.length; // Number of participants
     const D = tripDurationDays(trip.startDate, trip.endDate); // Duration in days
+    
+    console.log(`📐 Calculating mission distribution: N=${N} participants, D=${D} days`);
     
     // Algorithm from DEV FILE:
     // 1. Set base goal of 80-100 photos per trip
@@ -105,6 +140,8 @@ class MissionSchedulerService {
     
     // 4. m = ceil(M / D) → missions per user per day
     const m = Math.ceil(M / D);
+
+    console.log(`🎯 Mission calculation: X=${X} target photos, M=${M} per user, m=${m} per user per day`);
 
     return {
       participantCount: N,
@@ -148,6 +185,8 @@ class MissionSchedulerService {
   async assignInitialMissions(trip, missionTemplates, distribution) {
     const missions = [];
 
+    console.log(`🎯 Assigning initial missions for ${trip.members.length} members`);
+
     for (const member of trip.members) {
       // Assign first day missions
       const dailyMissions = this.selectMissionsForUser(
@@ -156,15 +195,16 @@ class MissionSchedulerService {
         trip.tripMode
       );
 
-      for (const missionTemplate of dailyMissions) {
-       missions.push({
-        userId: member.id,
-        tripId: trip.id,
-        missionTemplateId: missionTemplate.id,
-        dayAssigned: 1,
-        createdAt: new Date()
-      });
+      console.log(`👤 Assigning ${dailyMissions.length} missions to ${member.displayName || member.email}`);
 
+      for (const missionTemplate of dailyMissions) {
+        missions.push({
+          userId: member.id,
+          tripId: trip.id,
+          missionTemplateId: missionTemplate.id,
+          dayAssigned: 1,
+          createdAt: new Date()
+        });
       }
     }
 
@@ -172,6 +212,8 @@ class MissionSchedulerService {
     await prisma.assignedMission.createMany({
       data: missions
     });
+
+    console.log(`✅ Created ${missions.length} initial missions`);
 
     // Send mission notifications to all members
     for (const member of trip.members) {
@@ -220,14 +262,15 @@ class MissionSchedulerService {
     return selectedMissions;
   }
 
-  // Assign daily missions (for already active trips)
+  // ✅ FIXED: Assign daily missions (for already active trips)
   async assignDailyMissions() {
     try {
+      const now = new Date();
       const activeTrips = await prisma.trip.findMany({
         where: {
           status: 'ACTIVE',
           endDate: {
-            gte: new Date()
+            gte: now // Trip hasn't ended yet
           }
         },
         include: {
@@ -235,6 +278,8 @@ class MissionSchedulerService {
           tripAliases: true
         }
       });
+
+      console.log(`📋 Found ${activeTrips.length} active trips for daily mission assignment`);
 
       for (const trip of activeTrips) {
         await this.checkDailyMissionAssignment(trip);
@@ -244,18 +289,30 @@ class MissionSchedulerService {
     }
   }
 
-  // Check if daily missions need to be assigned for a trip
+  // ✅ FIXED: Check if daily missions need to be assigned for a trip
   async checkDailyMissionAssignment(trip) {
     try {
       const tripStartDate = new Date(trip.startDate);
       const now = new Date();
+      
+      // Calculate days since trip started (1-indexed)
       const daysSinceStart = Math.floor((now - tripStartDate) / (1000 * 60 * 60 * 24)) + 1;
+      
+      // Don't assign missions for days before the trip or after it should end
+      if (daysSinceStart < 1) {
+        console.log(`⏳ Trip "${trip.name}" hasn't started yet`);
+        return;
+      }
 
       const distribution = this.calculateMissionDistribution(trip);
+      
+      // Calculate expected missions per user based on days elapsed
       const expectedMissionsPerUser = Math.min(
         daysSinceStart * distribution.missionsPerUserPerDay,
-        distribution.missionsPerUser
+        distribution.missionsPerUser // Cap at total missions per user
       );
+
+      console.log(`📊 Trip "${trip.name}" - Day ${daysSinceStart}: Expected ${expectedMissionsPerUser} missions per user`);
 
       // Check each member's mission count
       for (const member of trip.members) {
@@ -268,7 +325,10 @@ class MissionSchedulerService {
 
         if (currentMissionCount < expectedMissionsPerUser) {
           const missionsNeeded = expectedMissionsPerUser - currentMissionCount;
+          console.log(`🎯 User ${member.displayName || member.email} needs ${missionsNeeded} more missions`);
           await this.assignAdditionalMissions(trip, member, missionsNeeded, daysSinceStart);
+        } else {
+          console.log(`✅ User ${member.displayName || member.email} has enough missions (${currentMissionCount}/${expectedMissionsPerUser})`);
         }
       }
     } catch (error) {
@@ -286,10 +346,6 @@ class MissionSchedulerService {
         userId: member.id,
         tripId: trip.id,
         missionTemplateId: missionTemplate.id, // ✅ PROPER TEMPLATE REFERENCE
-        title: missionTemplate.title,
-        instruction: missionTemplate.instruction,
-        category: missionTemplate.category,
-        sampleImageUrl: missionTemplate.sampleImageUrl,
         dayAssigned: dayNumber,
         createdAt: new Date()
       }));
@@ -307,24 +363,28 @@ class MissionSchedulerService {
         alias
       });
 
-      console.log(`✅ Assigned ${count} missions to ${member.displayName} for day ${dayNumber}`);
+      console.log(`✅ Assigned ${count} missions to ${member.displayName || member.email} for day ${dayNumber}`);
     } catch (error) {
       console.error(`Error assigning missions to ${member.id}:`, error);
     }
   }
 
-  // Check for trips that should end
+  // ✅ FIXED: Check for trips that should end
   async checkTripsToEnd() {
     try {
       const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      
       const tripsToEnd = await prisma.trip.findMany({
         where: {
           status: 'ACTIVE',
           endDate: {
-            lt: now
+            lt: today // End date is before today
           }
         }
       });
+
+      console.log(`🏁 Found ${tripsToEnd.length} trips that should end`);
 
       for (const trip of tripsToEnd) {
         await this.endTrip(trip);
@@ -346,8 +406,26 @@ class MissionSchedulerService {
       
       // Generate album could be triggered here
       // await albumService.generateAlbum(trip.id);
+       try {
+      await albumService.generateTripAlbum(trip.id);
+    } catch (albumError) {
+      console.error(`⚠️ Failed to generate album for trip ${trip.id}:`, albumError);
+    }
     } catch (error) {
       console.error(`Error ending trip ${trip.id}:`, error);
+    }
+  }
+
+  // ✅ NEW: Manual method to check and fix any trips that might have been missed
+  async manualTripCheck() {
+    try {
+      console.log('🔧 Running manual trip status check...');
+      await this.checkAndActivateTrips();
+      await this.assignDailyMissions();
+      await this.checkTripsToEnd();
+      console.log('✅ Manual trip check completed');
+    } catch (error) {
+      console.error('Error in manual trip check:', error);
     }
   }
 }

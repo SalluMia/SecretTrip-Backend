@@ -7,6 +7,10 @@ const { shuffleArray, tripDurationDays } = require('../utils/helpers');
 
 exports.createTrip = async ({ userId, name, theme,location, startDate, endDate, alias, tripMode = 'normal', description }) => {
   const code = generateCode(6);
+   const parsedStartDate = new Date(startDate);
+  const parsedEndDate = new Date(endDate);
+
+   await validateTripDateConflicts(userId, parsedStartDate, parsedEndDate);
   const trip = await prisma.trip.create({
     data: {
       name,
@@ -460,25 +464,31 @@ exports.activateTrip = async ({ tripId, creatorId }) => {
 
 exports.getMyMissions = async ({ tripId, userId }) => {
   // First, verify user is a member of this trip
-  const trip = await prisma.trip.findFirst({
-    where: {
-      id: tripId,
-      members: {
-        some: { id: userId }
-      }
-    },
-    select: {
-      id: true,
-      name: true,
-      status: true,
-      startDate: true,
-      endDate: true
-    }
-  });
 
-  if (!trip) {
-    throw new Error('Trip not found or you are not a member of this trip');
+
+  const trip = await prisma.trip.findFirst({
+  where: {
+    id: tripId,
+    members: {
+      some: {
+        id: userId
+      }
+    }
+  },
+  select: {
+    id: true,
+    name: true,
+    status: true,
+    startDate: true,
+    endDate: true
   }
+});
+
+if (!trip) {
+  throw new Error('Trip not found or you are not a member of this trip');
+}
+
+
 
   // Get user's alias for this trip
   const userAlias = await prisma.tripAlias.findUnique({
