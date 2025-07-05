@@ -1,20 +1,55 @@
-// src/services/home.service.js - Simplified version: Active trip + missions & Upcoming trips only
+// src/services/home.service.js - SIMPLIFIED VERSION (Active + Upcoming Only)
 
 const { prisma } = require('../config/prisma');
+
+// ✅ HELPER: Format mission data
+const formatMissionData = (mission) => ({
+  id: mission.id,
+  userId: mission.userId,
+  tripId: mission.tripId,
+  completed: mission.completed,
+  photoUrl: mission.photoUrl,
+  thumbnailUrl: mission.thumbnailUrl,
+  caption: mission.caption,
+  dayAssigned: mission.dayAssigned,
+  createdAt: mission.createdAt,
+  submittedAt: mission.submittedAt,
+  
+  // Mission Template Data
+  missionTemplateId: mission.missionTemplateId,
+  title: mission.missionTemplate?.title || mission.title,
+  instruction: mission.missionTemplate?.instruction || mission.instruction,
+  category: mission.missionTemplate?.category || mission.category,
+  sampleImageUrl: mission.missionTemplate?.sampleImageUrl || mission.sampleImageUrl,
+  level: mission.missionTemplate?.level || 'NORMAL',
+  location: mission.missionTemplate?.location,
+  
+  missionTemplate: mission.missionTemplate
+});
 
 exports.getHomeData = async (userId) => {
   let activeTripData = null;
   let activeMissions = [];
   let userAlias = null;
 
-  // Get active trip
+  // ✅ Get ACTIVE trip (created OR joined)
   const activeTrip = await prisma.trip.findFirst({
     where: {
-      members: { some: { id: userId } },
+      OR: [
+        { members: { some: { id: userId } } }, // Joined trip
+        { creatorId: userId }                  // Created trip
+      ],
       status: 'ACTIVE'
     },
     include: {
       members: {
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true
+        }
+      },
+      creator: {
         select: {
           id: true,
           displayName: true,
@@ -25,7 +60,7 @@ exports.getHomeData = async (userId) => {
   });
 
   if (activeTrip) {
-    // Get user's alias for this trip
+    // Get user's alias (only for joined trips, not created ones)
     const alias = await prisma.tripAlias.findUnique({
       where: {
         tripId_userId: {
@@ -35,12 +70,12 @@ exports.getHomeData = async (userId) => {
       }
     });
 
-    // Get active missions WITH mission template relationship
+    // ✅ Get ALL missions for this user in active trip (NO filtering by completed status)
     activeMissions = await prisma.assignedMission.findMany({
       where: {
         tripId: activeTrip.id,
-        userId: userId,
-        completed: false
+        userId: userId
+        // ✅ REMOVED: completed filter - ab sab missions milein gi
       },
       include: {
         missionTemplate: {
@@ -67,6 +102,8 @@ exports.getHomeData = async (userId) => {
     const now = new Date();
     const currentDay = Math.floor((now - tripStartDate) / (1000 * 60 * 60 * 24)) + 1;
 
+    const isCreator = activeTrip.creatorId === userId;
+
     activeTripData = {
       id: activeTrip.id,
       title: activeTrip.name,
@@ -77,20 +114,34 @@ exports.getHomeData = async (userId) => {
       status: activeTrip.status,
       currentDay: currentDay > 0 ? currentDay : 1,
       members: activeTrip.members,
-      memberCount: activeTrip.members.length
+      memberCount: activeTrip.members.length,
+      creator: activeTrip.creator,
+      creatorId: activeTrip.creatorId,
+      isCreator: isCreator,
+      userRole: isCreator ? 'CREATOR' : 'MEMBER'
     };
 
-    userAlias = alias?.alias;
+    userAlias = isCreator ? null : alias?.alias;
   }
 
-  // Get upcoming trips
+  // ✅ Get UPCOMING trips (created OR joined)
   const upcomingTrips = await prisma.trip.findMany({
     where: {
-      members: { some: { id: userId } },
+      OR: [
+        { members: { some: { id: userId } } }, // Joined trips
+        { creatorId: userId }                  // Created trips
+      ],
       status: 'UPCOMING'
     },
     include: {
       members: {
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true
+        }
+      },
+      creator: {
         select: {
           id: true,
           displayName: true,
@@ -104,17 +155,21 @@ exports.getHomeData = async (userId) => {
   // Format upcoming trips
   const formattedUpcomingTrips = await Promise.all(
     upcomingTrips.map(async (trip) => {
-      // Get user's alias for this trip
-      const tripAlias = await prisma.tripAlias.findUnique({
-        where: {
-          tripId_userId: {
-            tripId: trip.id,
-            userId
+      const isCreator = trip.creatorId === userId;
+      
+      // Get alias only for joined trips
+      let tripAlias = null;
+      if (!isCreator) {
+        tripAlias = await prisma.tripAlias.findUnique({
+          where: {
+            tripId_userId: {
+              tripId: trip.id,
+              userId
+            }
           }
-        }
-      });
+        });
+      }
 
-      // Calculate days until trip starts
       const daysUntilStart = Math.ceil((new Date(trip.startDate) - new Date()) / (1000 * 60 * 60 * 24));
 
       return {
@@ -128,44 +183,31 @@ exports.getHomeData = async (userId) => {
         daysUntilStart,
         alias: tripAlias?.alias || null,
         members: trip.members,
-        memberCount: trip.members.length
+        memberCount: trip.members.length,
+        creator: trip.creator,
+        creatorId: trip.creatorId,
+        isCreator: isCreator,
+        userRole: isCreator ? 'CREATOR' : 'MEMBER'
       };
     })
   );
 
   return {
-    // Active Trip Section
+    // ✅ Active Trip with ALL missions
     activeTrip: activeTripData,
     alias: userAlias,
-    
-    // Active missions with mission template information
-    activeMissions: activeMissions.map(mission => ({
-      // Assigned Mission Data
-      id: mission.id,
-      userId: mission.userId,
-      tripId: mission.tripId,
-      completed: mission.completed,
-      photoUrl: mission.photoUrl,
-      thumbnailUrl: mission.thumbnailUrl,
-      caption: mission.caption,
-      dayAssigned: mission.dayAssigned,
-      createdAt: mission.createdAt,
-      submittedAt: mission.submittedAt,
-      
-      // Mission Template Data (priority given to template, fallback to assigned mission fields)
-      missionTemplateId: mission.missionTemplateId,
-      title: mission.missionTemplate?.title || mission.title,
-      instruction: mission.missionTemplate?.instruction || mission.instruction,
-      category: mission.missionTemplate?.category || mission.category,
-      sampleImageUrl: mission.missionTemplate?.sampleImageUrl || mission.sampleImageUrl,
-      level: mission.missionTemplate?.level || 'NORMAL',
-      location: mission.missionTemplate?.location,
-      
-      // Complete Mission Template Object (if available)
-      missionTemplate: mission.missionTemplate
-    })),
+    activeMissions: activeMissions.map(formatMissionData),
 
-    // Upcoming Trips Section
-    upcomingTrips: formattedUpcomingTrips
+    // ✅ Upcoming Trips (created + joined)
+    upcomingTrips: formattedUpcomingTrips,
+    
+    // ✅ Simple summary
+    summary: {
+      hasActiveTrip: !!activeTripData,
+      totalMissionsCount: activeMissions.length,
+      upcomingTripsCount: formattedUpcomingTrips.length,
+      createdUpcomingTrips: formattedUpcomingTrips.filter(trip => trip.isCreator).length,
+      joinedUpcomingTrips: formattedUpcomingTrips.filter(trip => !trip.isCreator).length
+    }
   };
 };

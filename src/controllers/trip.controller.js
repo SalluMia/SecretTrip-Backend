@@ -388,3 +388,251 @@ function generateAliasSuggestions(baseAlias, takenAliases) {
   
   return suggestions.slice(0, 3);
 }
+
+
+exports.deleteTrip = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { tripId } = req.params;
+
+    if (!tripId) {
+      return errorResponse(res, 400, 'Trip ID is required');
+    }
+
+    const data = await tripService.deleteTrip({ tripId, userId });
+    
+    successResponse(res, 200, `Trip "${data.tripName}" deleted successfully`, {
+      deletedTripId: tripId,
+      tripName: data.tripName,
+      deletedAt: new Date().toISOString(),
+      membersNotified: data.membersNotified || 0
+    });
+  } catch (err) {
+    // Handle specific delete errors
+    if (err.message === 'Trip not found') {
+      return errorResponse(res, 404, 'Trip not found');
+    }
+    
+    if (err.message === 'Only trip creator can delete the trip') {
+      return errorResponse(res, 403, 'Access denied. Only the trip creator can delete this trip');
+    }
+    
+    if (err.message.includes('cannot be deleted')) {
+      return errorResponse(res, 400, err.message);
+    }
+    
+    next(err);
+  }
+};
+
+
+exports.editTrip = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { tripId } = req.params;
+    const updateData = req.body;
+
+    // Validate tripId
+    if (!tripId) {
+      return errorResponse(res, 400, 'Trip ID is required');
+    }
+
+    // Validate that at least one field is provided for update
+    const allowedFields = ['name', 'description', 'theme', 'location', 'startDate', 'endDate', 'tripMode'];
+    const hasValidFields = Object.keys(updateData).some(key => 
+      allowedFields.includes(key) && updateData[key] !== undefined && updateData[key] !== null
+    );
+
+    if (!hasValidFields) {
+      return errorResponse(res, 400, 'No valid fields provided for update. Allowed fields: ' + allowedFields.join(', '));
+    }
+
+    // Validate specific fields if provided
+    if (updateData.name && updateData.name.trim().length < 3) {
+      return errorResponse(res, 400, 'Trip name must be at least 3 characters long');
+    }
+
+    if (updateData.startDate && updateData.endDate) {
+      const startDate = new Date(updateData.startDate);
+      const endDate = new Date(updateData.endDate);
+      
+      if (startDate >= endDate) {
+        return errorResponse(res, 400, 'Start date must be before end date');
+      }
+    }
+
+    // Call service to edit trip
+    const data = await tripService.editTrip({ tripId, userId, updateData });
+    
+    console.log(`✅ Trip "${data.name}" successfully updated by user ${userId}`);
+    console.log(`📝 Updated fields: ${data.updatedFields.join(', ')}`);
+    
+    // Generate dynamic success message
+    const fieldsUpdated = data.updatedFields.length;
+    const fieldsText = fieldsUpdated === 1 ? 'field' : 'fields';
+    const message = `Trip "${data.name}" updated successfully (${fieldsUpdated} ${fieldsText} modified)`;
+    
+    successResponse(res, 200, message, data);
+  } catch (err) {
+    console.error('Edit Trip Error:', {
+      error: err.message,
+      userId: req.user?.id,
+      tripId: req.params?.tripId,
+      updateData: req.body,
+      timestamp: new Date().toISOString()
+    });
+
+    // Handle specific edit errors with appropriate HTTP status codes
+    if (err.message === 'Trip not found') {
+      return errorResponse(res, 404, 'Trip not found');
+    }
+    
+    if (err.message === 'Only trip creator can edit the trip') {
+      return errorResponse(res, 403, 'Access denied. Only the trip creator can edit this trip');
+    }
+    
+    if (err.message.includes('cannot be edited')) {
+      return errorResponse(res, 400, err.message);
+    }
+    
+    if (err.message.includes('overlap') || err.message.includes('conflict')) {
+      return errorResponse(res, 409, err.message);
+    }
+    
+    if (err.message.includes('No valid fields')) {
+      return errorResponse(res, 400, err.message);
+    }
+    
+    // Unhandled errors go to global error handler
+    next(err);
+  }
+};
+
+
+// ✅ NEW: Leave trip endpoint
+exports.leaveTrip = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { tripId } = req.params;
+    const { reason } = req.body;
+
+    // Validate tripId
+    if (!tripId) {
+      return errorResponse(res, 400, 'Trip ID is required');
+    }
+
+    // Validate reason (optional but if provided, should not be empty)
+    if (reason !== undefined && reason !== null && reason.toString().trim().length === 0) {
+      return errorResponse(res, 400, 'Reason cannot be empty if provided');
+    }
+
+    // Validate reason length
+    if (reason && reason.toString().length > 500) {
+      return errorResponse(res, 400, 'Reason cannot exceed 500 characters');
+    }
+
+    // Call service to leave trip with reason
+    const data = await tripService.leaveTrip({ tripId, userId, reason });
+    
+    console.log(`✅ User ${userId} successfully left trip "${data.tripName}" with reason: "${data.reason}"`);
+    
+    // Generate dynamic success message
+    let message = `Successfully left trip "${data.tripName}"`;
+    if (data.reason && data.reason !== 'No reason provided') {
+      message += ` (Reason: ${data.reason.substring(0, 50)}${data.reason.length > 50 ? '...' : ''})`;
+    }
+    
+    successResponse(res, 200, message, {
+      tripId: data.tripId,
+      tripName: data.tripName,
+      userName: data.userName,
+      userAlias: data.userAlias,
+      reason: data.reason,
+      leftAt: data.leftAt,
+      remainingMemberCount: data.remainingMemberCount,
+      cleanupSummary: data.cleanupSummary,
+      leaveActivity: data.leaveActivity
+    });
+  } catch (err) {
+    console.error('Leave Trip Error:', {
+      error: err.message,
+      userId: req.user?.id,
+      tripId: req.params?.tripId,
+      reason: req.body?.reason,
+      timestamp: new Date().toISOString()
+    });
+
+    // Handle specific leave trip errors
+    if (err.message === 'Trip not found') {
+      return errorResponse(res, 404, 'Trip not found');
+    }
+    
+    if (err.message === 'You are not a member of this trip') {
+      return errorResponse(res, 403, 'You are not a member of this trip');
+    }
+    
+    if (err.message === 'Trip creator cannot leave the trip. Please delete the trip instead') {
+      return errorResponse(res, 400, 'Trip creators cannot leave their own trips. Please delete the trip instead');
+    }
+    
+    if (err.message.includes('Cannot leave')) {
+      return errorResponse(res, 400, err.message);
+    }
+
+    if (err.message.includes('Reason cannot exceed 500 characters')) {
+      return errorResponse(res, 400, err.message);
+    }
+    
+    // Unhandled errors go to global error handler
+    next(err);
+  }
+};
+
+// ✅ NEW: Get completed missions endpoint
+exports.getTripCompletedMissions = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { tripId } = req.params;
+
+    // Validate tripId
+    if (!tripId) {
+      return errorResponse(res, 400, 'Trip ID is required');
+    }
+
+    // Call service to get completed missions
+    const data = await tripService.getTripCompletedMissions({ tripId, userId });
+    
+    console.log(`✅ Retrieved ${data.summary.totalCompleted} completed missions for user ${userId} in trip "${data.trip.name}"`);
+    
+    // Generate dynamic response message
+    const { totalCompleted, completionPercentage, categoriesCompleted } = data.summary;
+    let message = `Retrieved ${totalCompleted} completed missions`;
+    
+    if (totalCompleted > 0) {
+      message += ` (${completionPercentage}% completion rate)`;
+      if (categoriesCompleted > 1) {
+        message += ` across ${categoriesCompleted} categories`;
+      }
+    } else {
+      message = 'No completed missions found for this trip';
+    }
+    
+    successResponse(res, 200, message, data);
+  } catch (err) {
+    console.error('Get Completed Missions Error:', {
+      error: err.message,
+      userId: req.user?.id,
+      tripId: req.params?.tripId,
+      timestamp: new Date().toISOString()
+    });
+
+    // Handle specific errors
+    if (err.message === 'Trip not found or you do not have access to this trip') {
+      return errorResponse(res, 404, 'Trip not found or you do not have access to this trip');
+    }
+    
+    // Unhandled errors go to global error handler
+    next(err);
+  }
+};
+

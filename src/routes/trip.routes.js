@@ -11,6 +11,10 @@ router.get('/preview/:code', tripController.getTripByCode);
 router.post('/join', tripController.joinTrip);
 router.get('/check-alias', tripController.checkAliasAvailability);
 
+router.put('/:tripId', tripController.editTrip);  
+router.delete('/:tripId', tripController.deleteTrip);
+router.post('/:tripId/leave', tripController.leaveTrip); // Leave trip
+router.get('/:tripId/completed-missions', tripController.getTripCompletedMissions);
 // Trip management
 router.get('/my', tripController.getMyTrips);
 router.get('/status', tripController.getTripsByStatus); 
