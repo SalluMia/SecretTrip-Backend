@@ -54,7 +54,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // ✅ Static file serving for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
+// app.use('/uploads/mission-photos', express.static(path.join(__dirname, 'uploads/mission-photos')));
+app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 // ✅ Session setup
 app.use(session({
   secret: process.env.SESSION_SECRET || 'secret',

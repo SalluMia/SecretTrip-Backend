@@ -161,6 +161,7 @@ model Album {
   printed   Boolean   @default(false)
   expiresAt DateTime? // When free access expires
   createdAt DateTime  @default(now())
+  updatedAt DateTime?
 
   trip Trip @relation(fields: [tripId], references: [id])
 }

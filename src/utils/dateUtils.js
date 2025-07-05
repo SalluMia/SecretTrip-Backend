@@ -166,6 +166,14 @@ function toDateString(date) {
   return new Date(date).toISOString().split('T')[0];
 }
 
+function formatDate(date) {
+  if (!date) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  }).format(new Date(date));
+}
 module.exports = {
   tripDurationDays,
   shouldActivateTrip,
@@ -177,5 +185,6 @@ module.exports = {
   getStartOfDay,
   addDays,
   validateTripDates,
-  toDateString
+  toDateString,
+  formatDate
 };

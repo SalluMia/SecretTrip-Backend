@@ -9,9 +9,16 @@ router.use(auth); // Protect all album routes
 router.get('/trip/:tripId', albumController.getAlbumAccess);
 
 // Download album (standard or HD)
-router.get('/trip/:tripId/download', albumController.downloadAlbum);
+router.get('/trip/:tripId/download', albumController.downloadAlbumPDF);
 
 // Get trip photos for album preview
 router.get('/trip/:tripId/photos', albumController.getTripPhotos);
+router.get('/:tripId/overview', auth, albumController.getTripAlbumOverview);
+
+// Screen 17: Album Preview with all photos
+// GET /api/trip-albums/:tripId/preview  
+router.get('/:tripId/preview', auth, albumController.getAlbumPreview);
+
+router.post('/trip/:tripId/generate', albumController.generateTestAlbum);
 
 module.exports = router;
