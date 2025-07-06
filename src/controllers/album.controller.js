@@ -8,6 +8,83 @@ const path = require('path');
 const fs = require('fs');
 const { formatDate } = require('../utils/dateUtils');
 
+
+// controllers/album.controller.js
+exports.getAllAlbumsForAdmin = async (req, res) => {
+  try {
+    const user = req.user;
+    console.log(user)
+    // if (user.role !== 'ADMIN') {
+    //   return res.status(403).json({ message: 'Access denied – admin only' });
+    // }
+
+    // Get albums + trip info
+    const albums = await prisma.album.findMany({
+      include: {
+        trip: {
+          include: {
+            _count: {
+              select: { assignedMissions: { where: { completed: true, photoUrl: { not: null } } } }
+            },
+            assignedMissions: {
+              where: {
+                completed: true,
+                photoUrl: { not: null }
+              },
+              include: {
+                user: { select: { displayName: true } },
+                missionTemplate: { select: { title: true } }
+              },
+              orderBy: { submittedAt: 'asc' },
+              take: 1 // ✅ Only first photo
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const formatted = albums.map(album => {
+      const firstMission = album.trip.assignedMissions[0];
+
+      return {
+        albumId: album.id,
+        tripId: album.trip.id,
+        tripName: album.trip.name,
+        location: album.trip.location,
+        startDate: album.trip.startDate,
+        endDate: album.trip.endDate,
+        status: album.trip.status,
+        createdAt: album.createdAt,
+        expiresAt: album.expiresAt,
+        hasStandard: !!album.pdfUrl,
+        hasHD: !!album.pdfHDUrl,
+        totalPhotos: album.trip._count.assignedMissions,
+        coverImage: firstMission
+          ? {
+              photoUrl: firstMission.photoUrl,
+              thumbnailUrl: firstMission.thumbnailUrl || firstMission.photoUrl,
+              submittedAt: firstMission.submittedAt,
+              submittedBy: firstMission.user.displayName,
+              missionTitle: firstMission.missionTemplate?.title || 'Mission Photo'
+            }
+          : null
+      };
+    });
+
+    res.status(200).json({
+      message: 'All albums retrieved successfully',
+      data: formatted
+    });
+  } catch (error) {
+    console.error('❌ Error getting albums for admin:', error);
+    res.status(500).json({
+      message: 'Failed to fetch albums',
+      error: error.message
+    });
+  }
+};
+
 // ✅ NEW: Diagnose photo issues for a trips
 exports.diagnosePhotos = async (req, res) => {
   try {

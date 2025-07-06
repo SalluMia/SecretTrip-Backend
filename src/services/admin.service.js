@@ -511,3 +511,71 @@ exports.deletePrivacyPolicy = async () => {
 
   return await prisma.privacyPolicy.delete({ where: { id: existing.id } });
 };
+
+
+
+exports.getTripFullDetail = async (tripId) => {
+  const trip = await prisma.trip.findUnique({
+    where: { id: tripId },
+    include: {
+      members: {
+        select: { id: true, displayName: true, email: true }
+      },
+      album: true
+    }
+  });
+
+  if (!trip) throw new Error('Trip not found');
+
+  const completedMissions = await prisma.assignedMission.findMany({
+    where: {
+      tripId,
+      completed: true,
+      photoUrl: { not: null }
+    },
+    include: {
+      user: { select: { displayName: true } },
+      missionTemplate: {
+        select: {
+          title: true,
+          instruction: true,
+          category: true,
+          level: true
+        }
+      }
+    },
+    orderBy: { submittedAt: 'asc' }
+  });
+
+  const formattedMissions = completedMissions.map(m => ({
+    id: m.id,
+    photoUrl: m.photoUrl,
+    thumbnailUrl: m.thumbnailUrl || m.photoUrl,
+    caption: m.caption,
+    submittedAt: m.submittedAt,
+    user: m.user.displayName,
+    missionTitle: m.missionTemplate?.title,
+    category: m.missionTemplate?.category,
+    level: m.missionTemplate?.level
+  }));
+
+  return {
+    trip: {
+      id: trip.id,
+      name: trip.name,
+      location: trip.location,
+      status: trip.status,
+      startDate: trip.startDate,
+      endDate: trip.endDate,
+      memberCount: trip.members.length,
+      createdAt: trip.createdAt
+    },
+    completedMissions: formattedMissions,
+    album: trip.album ? {
+      pdfUrl: trip.album.pdfUrl,
+      pdfHDUrl: trip.album.pdfHDUrl,
+      expiresAt: trip.album.expiresAt,
+      photos: formattedMissions.map(m => m.photoUrl) // reuse from above
+    } : null
+  };
+};

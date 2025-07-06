@@ -17,6 +17,7 @@ router.put('/users/:id/status', adminController.toggleUserStatus);
 
 // Trip Records Management
 router.get('/trips', adminController.getAllTrips);
+// router.get('/trips', adminController.getFullTripDetail);
 router.get('/trips/details/:tripId', adminController.getFullTripDetail);
 
 // Package Management

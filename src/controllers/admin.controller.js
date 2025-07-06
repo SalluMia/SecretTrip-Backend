@@ -60,15 +60,15 @@ exports.getAllTrips = async (req, res, next) => {
   }
 };
 
-exports.getFullTripDetail = async (req, res, next) => {
-  try {
-    const { tripId } = req.params;
-    const data = await adminService.getFullTripDetail(tripId);
-    successResponse(res, 200, 'Trip full detail fetched', data);
-  } catch (err) {
-    next(err);
-  }
-};
+// exports.getFullTripDetail = async (req, res, next) => {
+//   try {
+//     const { tripId } = req.params;
+//     const data = await adminService.getFullTripDetail(tripId);
+//     successResponse(res, 200, 'Trip full detail fetched', data);
+//   } catch (err) {
+//     next(err);
+//   }
+// };
 
 exports.createPackage = async (req, res, next) => {
   try {
@@ -350,5 +350,23 @@ exports.manuallyActivateTrip = async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+};
+
+
+exports.getFullTripDetail = async (req, res, next) => {
+  try {
+    const { tripId } = req.params;
+
+    if (!tripId) {
+      return errorResponse(res, 400, 'Trip ID is required');
+    }
+
+    const tripDetails = await adminService.getTripFullDetail(tripId);
+
+    successResponse(res, 200, 'Trip details fetched successfully', tripDetails);
+  } catch (error) {
+    console.error('❌ Admin getFullTripDetail error:', error);
+    next(error);
   }
 };

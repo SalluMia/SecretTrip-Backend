@@ -3,6 +3,8 @@ const router = express.Router();
 const albumController = require('../controllers/album.controller');
 const auth = require('../middlewares/auth');
 
+router.get('/admin/all', albumController.getAllAlbumsForAdmin);
+
 router.use(auth); // Protect all album routes
 
 // Get album access information
