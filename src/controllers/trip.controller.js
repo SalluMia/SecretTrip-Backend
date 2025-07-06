@@ -7,13 +7,25 @@ const notificationService = require('../services/notification.service');
 exports.createTrip = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { name, theme,location, startDate, endDate, alias, description, tripMode = 'normal' } = req.body;
+    const { name, theme, location, startDate, endDate, alias, description, tripMode = 'normal' } = req.body;
 
     if (!name || !theme || !location || !startDate || !endDate || !alias || !description) {
       return errorResponse(res, 400, 'All fields are required');
     }
 
-    // Check if user has FCM token (for receiving join notifications)
+    // Validate date format and logic
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return errorResponse(res, 400, 'Invalid date format');
+    }
+    
+    if (start >= end) {
+      return errorResponse(res, 400, 'Start date must be before end date');
+    }
+
+    // // Check if user has FCM token (for receiving join notifications)
     // const user = await prisma.user.findUnique({
     //   where: { id: userId },
     //   select: { fcmToken: true }
@@ -37,8 +49,36 @@ exports.createTrip = async (req, res, next) => {
       tripMode 
     });
     
-    successResponse(res, 201, 'Trip created successfully', data);
+    // ✅ Enhanced response with status information
+    const responseMessage = data.isActive 
+      ? 'Trip created and activated! Your adventure begins now 🚀'
+      : 'Trip created successfully! Get ready for your upcoming adventure 📅';
+    
+    const responseData = {
+      tripId: data.tripId,
+      code: data.code,
+      status: data.status,
+      isActive: data.isActive,
+      message: data.message,
+      createdAt: new Date().toISOString(),
+    };
+    
+    console.log(`✅ Trip "${name}" created with status: ${data.status}`);
+    if (data.isActive) {
+      console.log('🎯 Trip is active - missions have been assigned');
+    }
+    
+    successResponse(res, 201, responseMessage, responseData);
   } catch (err) {
+    // Handle specific creation errors
+    if (err.message.includes('overlap') || err.message.includes('conflict')) {
+      return errorResponse(res, 409, err.message);
+    }
+    
+    if (err.message === 'Cannot create a trip with end date in the past') {
+      return errorResponse(res, 400, 'Cannot create a trip with end date in the past. Please choose future dates.');
+    }
+    
     next(err);
   }
 };

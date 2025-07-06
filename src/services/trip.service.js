@@ -5,20 +5,45 @@ const { prisma } = require('../config/prisma');
 const { generateCode } = require('../utils/generateCode');
 const { shuffleArray, tripDurationDays } = require('../utils/helpers');
 
-exports.createTrip = async ({ userId, name, theme,location, startDate, endDate, alias, tripMode = 'normal', description }) => {
+exports.createTrip = async ({ userId, name, theme, location, startDate, endDate, alias, tripMode = 'normal', description }) => {
   const code = generateCode(6);
-   const parsedStartDate = new Date(startDate);
+  const parsedStartDate = new Date(startDate);
   const parsedEndDate = new Date(endDate);
 
-   await validateTripDateConflicts(userId, parsedStartDate, parsedEndDate);
+  // ✅ FIXED: Pass the trip name parameter to the validation function
+  await validateTripDateConflicts(userId, parsedStartDate, parsedEndDate, name);
+  
+  // ✅ NEW: Determine trip status based on start date
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
+  
+  const startDateOnly = new Date(parsedStartDate);
+  startDateOnly.setHours(0, 0, 0, 0);
+  
+  const endDateOnly = new Date(parsedEndDate);
+  endDateOnly.setHours(0, 0, 0, 0);
+  
+  let tripStatus = 'UPCOMING';
+  
+  // Check if trip should be active or completed based on dates
+  if (startDateOnly <= today && endDateOnly >= today) {
+    tripStatus = 'ACTIVE';
+  } else if (endDateOnly < today) {
+    throw new Error('Cannot create a trip with end date in the past');
+  }
+  
+  console.log(`🗓️ Trip "${name}" dates: ${startDateOnly.toDateString()} to ${endDateOnly.toDateString()}`);
+  console.log(`📅 Today: ${today.toDateString()}`);
+  console.log(`🎯 Trip status will be: ${tripStatus}`);
+  
   const trip = await prisma.trip.create({
     data: {
       name,
       theme,
       location,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      status: 'UPCOMING',
+      startDate: parsedStartDate,
+      endDate: parsedEndDate,
+      status: tripStatus,
       code,
       creatorId: userId,
       tripMode,
@@ -31,9 +56,53 @@ exports.createTrip = async ({ userId, name, theme,location, startDate, endDate, 
     data: { userId, tripId: trip.id, alias }
   });
 
-  return { tripId: trip.id, code: trip.code };
-};
+  // ✅ NEW: If trip is active, automatically assign missions
+  if (tripStatus === 'ACTIVE') {
+    console.log(`🚀 Trip "${name}" is starting today, auto-assigning missions...`);
+    
+    try {
+      const days = tripDurationDays(trip.startDate, trip.endDate);
+      const N = 1; // Only creator initially
+      const target = (N * days < 40) ? 100 : 80;
+      const M = Math.ceil(target / N);
 
+      const allTemplates = await prisma.missionTemplate.findMany({
+        where: { category: trip.theme }
+      });
+
+      if (allTemplates.length > 0) {
+        const selected = shuffleArray(allTemplates).slice(0, M);
+        for (const tmpl of selected) {
+          await prisma.assignedMission.create({
+            data: {
+              tripId: trip.id,
+              userId: userId,
+              title: tmpl.title,
+              instruction: tmpl.instruction,
+              category: tmpl.category,
+              sampleImageUrl: tmpl.sampleImageUrl,
+              missionTemplateId: tmpl.id
+            }
+          });
+        }
+        console.log(`✅ Assigned ${selected.length} missions to trip creator`);
+      }
+    } catch (missionError) {
+      console.error('Failed to assign missions during trip creation:', missionError);
+      // Don't fail trip creation if mission assignment fails
+    }
+  }
+
+  return { 
+    tripId: trip.id, 
+    code: trip.code, 
+    status: tripStatus,
+    isActive: tripStatus === 'ACTIVE',
+    message: tripStatus === 'ACTIVE' 
+      ? `Trip "${name}" created and activated! Missions have been assigned.`
+      : `Trip "${name}" created successfully and scheduled to start on ${startDateOnly.toDateString()}.`
+  };
+};
 // Enhanced trip preview with detailed information
 exports.getTripByCodeWithDetails = async ({ code, userId }) => {
   const trip = await prisma.trip.findUnique({
