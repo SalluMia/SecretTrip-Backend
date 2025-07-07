@@ -19,6 +19,7 @@ router.put('/users/:id/status', adminController.toggleUserStatus);
 router.get('/trips', adminController.getAllTrips);
 // router.get('/trips', adminController.getFullTripDetail);
 router.get('/trips/details/:tripId', adminController.getFullTripDetail);
+router.post('/download-pdf', adminController.downloadPDFByPath);
 
 // Package Management
 router.post('/packages', adminController.createPackage);

@@ -1,5 +1,9 @@
+const { default: axios } = require('axios');
 const adminService = require('../services/admin.service');
 const { successResponse, errorResponse } = require('../utils/response');
+const fs = require('fs');
+const path = require('path');
+
 exports.getDashboardAnalytics = async (req, res, next) => {
   try {
     const data = await adminService.getAdminDashboardStats();
@@ -370,3 +374,93 @@ exports.getFullTripDetail = async (req, res, next) => {
     next(error);
   }
 };
+
+
+exports.downloadPDFByPath = async (req, res, next) => {
+  try {
+    const { pdfUrl } = req.body;
+
+    if (!pdfUrl) {
+      return errorResponse(res, 400, 'PDF URL is required');
+    }
+
+    // Validate local URL only (for security)
+    if (!pdfUrl.startsWith(`${process.env.BACKEND_URL}/uploads/albums/`)) {
+      return errorResponse(res, 400, 'Invalid PDF URL - must be from local uploads directory');
+    }
+
+    console.log(`🔗 Downloading PDF from URL: ${pdfUrl}`);
+
+    // Extract clean file name for attachment
+    const originalFilename = pdfUrl.split('/').pop();
+    const isHD = pdfUrl.includes('hd') || originalFilename.includes('hd');
+    const cleanFilename = `Trip_Album_${isHD ? 'HD' : 'Standard'}.pdf`;
+    
+    console.log(`📄 Generated filename: ${cleanFilename}`);
+
+    try {
+      // Fetch PDF from URL as stream with timeout
+      const fileResponse = await axios({
+        method: 'GET',
+        url: pdfUrl,
+        responseType: 'stream',
+        timeout: 30000, // 30 seconds timeout
+        headers: {
+          'User-Agent': 'Internal-PDF-Downloader'
+        }
+      });
+
+      // Get content length if available
+      const contentLength = fileResponse.headers['content-length'];
+      
+      // Set download headers
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+      res.setHeader('Cache-Control', 'no-cache');
+      
+      if (contentLength) {
+        res.setHeader('Content-Length', contentLength);
+      }
+
+      console.log(`📦 Streaming PDF: ${cleanFilename} (${contentLength ? `${contentLength} bytes` : 'unknown size'})`);
+
+      // Handle stream errors
+      fileResponse.data.on('error', (streamError) => {
+        console.error('❌ Stream error:', streamError);
+        if (!res.headersSent) {
+          return errorResponse(res, 500, 'Error streaming PDF file');
+        }
+      });
+
+      // Handle successful completion
+      fileResponse.data.on('end', () => {
+        console.log(`✅ PDF download completed: ${cleanFilename}`);
+      });
+
+      // Pipe stream to response
+      fileResponse.data.pipe(res);
+
+    } catch (axiosError) {
+      console.error('❌ Axios error downloading PDF:', axiosError.message);
+      
+      if (axiosError.code === 'ECONNREFUSED') {
+        return errorResponse(res, 503, 'PDF service temporarily unavailable');
+      } else if (axiosError.response && axiosError.response.status === 404) {
+        return errorResponse(res, 404, 'PDF file not found on server');
+      } else if (axiosError.code === 'ENOTFOUND') {
+        return errorResponse(res, 400, 'Invalid PDF URL');
+      } else if (axiosError.code === 'ETIMEDOUT') {
+        return errorResponse(res, 408, 'Request timeout - PDF file too large or server slow');
+      } else {
+        return errorResponse(res, 500, 'Unable to fetch PDF file');
+      }
+    }
+
+  } catch (error) {
+    console.error('❌ Error in downloadPDFByURL:', error);
+    if (!res.headersSent) {
+      return errorResponse(res, 500, 'Internal server error while downloading PDF');
+    }
+  }
+};
+

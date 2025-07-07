@@ -48,6 +48,7 @@ exports.createTrip = async ({ userId, name, theme, location, startDate, endDate,
       creatorId: userId,
       tripMode,
       description,
+      alias,
       members: { connect: { id: userId } },
     }
   });
