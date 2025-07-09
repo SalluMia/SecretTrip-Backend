@@ -368,3 +368,509 @@ function groupPaymentsByMonth(payments) {
   });
   return grouped;
 }
+
+// Enhanced payment.service.js - Get revenue data directly from Stripe
+
+// Get comprehensive revenue analytics directly from Stripe
+exports.getAdminRevenueAnalytics = async function (options = {}) {
+  try {
+    const {
+      startDate,
+      endDate,
+      groupBy = 'monthly', // 'monthly', 'yearly', 'daily', 'weekly', 'all'
+      period = 'all', // 'current-month', 'current-year', 'last-month', 'last-year', 'custom', 'all'
+      timezone = 'UTC'
+    } = options;
+
+    // Calculate date range based on period
+    let calculatedStartDate = startDate;
+    let calculatedEndDate = endDate;
+    
+    const now = new Date();
+    switch (period) {
+      case 'current-month':
+        calculatedStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        calculatedEndDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        break;
+      case 'current-year':
+        calculatedStartDate = new Date(now.getFullYear(), 0, 1);
+        calculatedEndDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+        break;
+      case 'last-month':
+        calculatedStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        calculatedEndDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+        break;
+      case 'last-year':
+        calculatedStartDate = new Date(now.getFullYear() - 1, 0, 1);
+        calculatedEndDate = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59);
+        break;
+      case 'last-7-days':
+        calculatedStartDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        calculatedEndDate = now;
+        break;
+      case 'last-30-days':
+        calculatedStartDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        calculatedEndDate = now;
+        break;
+      case 'last-90-days':
+        calculatedStartDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+        calculatedEndDate = now;
+        break;
+      case 'custom':
+        // Use provided startDate and endDate
+        break;
+      case 'all':
+      default:
+        // Get data from last 2 years if no specific range
+        calculatedStartDate = new Date(now.getFullYear() - 2, 0, 1);
+        calculatedEndDate = now;
+        break;
+    }
+
+    // Fetch data from Stripe
+    const stripeData = await fetchStripePaymentData(calculatedStartDate, calculatedEndDate);
+    
+    // Get additional customer data from Stripe
+    const customerData = await fetchStripeCustomerData(stripeData.charges);
+    
+    // Process and analyze the data
+    const analytics = await processStripeAnalytics(stripeData, customerData, groupBy);
+
+    return {
+      summary: {
+        totalPayments: analytics.totalPayments,
+        totalRevenue: analytics.totalRevenue / 100, // Convert to euros
+        netRevenue: analytics.netRevenue / 100,
+        totalFees: analytics.totalFees / 100,
+        averageOrderValue: analytics.averageOrderValue / 100,
+        currency: CURRENCY.toUpperCase()
+      },
+      revenueByType: analytics.revenueByType,
+      timeSeriesData: analytics.timeSeriesData,
+      topCustomers: analytics.topCustomers,
+      growthMetrics: analytics.growthMetrics,
+      stripeMetrics: {
+        successfulCharges: analytics.successfulCharges,
+        failedCharges: analytics.failedCharges,
+        refunds: analytics.refunds,
+        disputes: analytics.disputes
+      },
+      dateRange: {
+        startDate: calculatedStartDate,
+        endDate: calculatedEndDate,
+        period,
+        groupBy
+      },
+      dataSource: 'stripe'
+    };
+  } catch (error) {
+    console.error('Error getting Stripe revenue analytics:', error);
+    throw error;
+  }
+};
+
+// Fetch payment data from Stripe
+async function fetchStripePaymentData(startDate, endDate) {
+  try {
+    const charges = [];
+    const refunds = [];
+    const paymentIntents = [];
+    
+    // Convert dates to Unix timestamps
+    const startTimestamp = Math.floor(startDate.getTime() / 1000);
+    const endTimestamp = Math.floor(endDate.getTime() / 1000);
+
+    // Fetch all charges
+    let hasMoreCharges = true;
+    let lastChargeId = null;
+    
+    while (hasMoreCharges) {
+      const chargeParams = {
+        limit: 100,
+        created: {
+          gte: startTimestamp,
+          lte: endTimestamp
+        }
+      };
+      
+      if (lastChargeId) {
+        chargeParams.starting_after = lastChargeId;
+      }
+      
+      const chargeList = await stripe.charges.list(chargeParams);
+      charges.push(...chargeList.data);
+      
+      hasMoreCharges = chargeList.has_more;
+      if (hasMoreCharges) {
+        lastChargeId = chargeList.data[chargeList.data.length - 1].id;
+      }
+    }
+
+    // Fetch all refunds
+    let hasMoreRefunds = true;
+    let lastRefundId = null;
+    
+    while (hasMoreRefunds) {
+      const refundParams = {
+        limit: 100,
+        created: {
+          gte: startTimestamp,
+          lte: endTimestamp
+        }
+      };
+      
+      if (lastRefundId) {
+        refundParams.starting_after = lastRefundId;
+      }
+      
+      const refundList = await stripe.refunds.list(refundParams);
+      refunds.push(...refundList.data);
+      
+      hasMoreRefunds = refundList.has_more;
+      if (hasMoreRefunds) {
+        lastRefundId = refundList.data[refundList.data.length - 1].id;
+      }
+    }
+
+    // Fetch payment intents for additional metadata
+    let hasMorePaymentIntents = true;
+    let lastPaymentIntentId = null;
+    
+    while (hasMorePaymentIntents) {
+      const piParams = {
+        limit: 100,
+        created: {
+          gte: startTimestamp,
+          lte: endTimestamp
+        }
+      };
+      
+      if (lastPaymentIntentId) {
+        piParams.starting_after = lastPaymentIntentId;
+      }
+      
+      const piList = await stripe.paymentIntents.list(piParams);
+      paymentIntents.push(...piList.data);
+      
+      hasMorePaymentIntents = piList.has_more;
+      if (hasMorePaymentIntents) {
+        lastPaymentIntentId = piList.data[piList.data.length - 1].id;
+      }
+    }
+
+    return {
+      charges,
+      refunds,
+      paymentIntents
+    };
+  } catch (error) {
+    console.error('Error fetching Stripe payment data:', error);
+    throw error;
+  }
+}
+
+// Fetch customer data from Stripe
+async function fetchStripeCustomerData(charges) {
+  try {
+    const customerIds = [...new Set(charges.filter(c => c.customer).map(c => c.customer))];
+    const customers = [];
+    
+    // Fetch customer details in batches
+    for (const customerId of customerIds) {
+      try {
+        const customer = await stripe.customers.retrieve(customerId);
+        customers.push(customer);
+      } catch (error) {
+        console.error(`Error fetching customer ${customerId}:`, error);
+      }
+    }
+    
+    return customers;
+  } catch (error) {
+    console.error('Error fetching Stripe customer data:', error);
+    throw error;
+  }
+}
+
+// Process Stripe analytics
+async function processStripeAnalytics(stripeData, customerData, groupBy) {
+  const { charges, refunds, paymentIntents } = stripeData;
+  
+  // Filter successful charges only
+  const successfulCharges = charges.filter(charge => charge.status === 'succeeded');
+  const failedCharges = charges.filter(charge => charge.status === 'failed');
+  
+  // Calculate totals
+  const totalRevenue = successfulCharges.reduce((sum, charge) => sum + charge.amount, 0);
+  const totalFees = successfulCharges.reduce((sum, charge) => sum + (charge.application_fee_amount || 0), 0);
+  const stripeFees = successfulCharges.reduce((sum, charge) => {
+    // Estimate Stripe fees (2.9% + 30 cents for European cards)
+    return sum + Math.round(charge.amount * 0.029) + 30;
+  }, 0);
+  
+  const netRevenue = totalRevenue - stripeFees;
+  const totalPayments = successfulCharges.length;
+  const averageOrderValue = totalPayments > 0 ? totalRevenue / totalPayments : 0;
+
+  // Group by payment type based on metadata
+  const revenueByType = {};
+  successfulCharges.forEach(charge => {
+    const paymentIntent = paymentIntents.find(pi => pi.latest_charge === charge.id);
+    const type = paymentIntent?.metadata?.type || 'unknown';
+    
+    if (!revenueByType[type]) {
+      revenueByType[type] = { amount: 0, count: 0 };
+    }
+    
+    revenueByType[type].amount += charge.amount;
+    revenueByType[type].count++;
+  });
+
+  // Convert to percentage
+  Object.keys(revenueByType).forEach(type => {
+    revenueByType[type].amount = revenueByType[type].amount / 100;
+    revenueByType[type].percentage = ((revenueByType[type].amount * 100) / (totalRevenue / 100) * 100).toFixed(2);
+  });
+
+  // Group data by time period
+  const timeSeriesData = groupChargesByPeriod(successfulCharges, groupBy);
+
+  // Get top customers
+  const topCustomers = getTopCustomersFromCharges(successfulCharges, customerData);
+
+  // Calculate growth metrics
+  const growthMetrics = calculateGrowthMetricsFromCharges(successfulCharges);
+
+  return {
+    totalPayments,
+    totalRevenue,
+    netRevenue,
+    totalFees: stripeFees,
+    averageOrderValue,
+    revenueByType,
+    timeSeriesData,
+    topCustomers,
+    growthMetrics,
+    successfulCharges: successfulCharges.length,
+    failedCharges: failedCharges.length,
+    refunds: refunds.length,
+    disputes: charges.filter(c => c.dispute).length
+  };
+}
+
+// Group charges by time period
+function groupChargesByPeriod(charges, groupBy) {
+  const grouped = {};
+  
+  charges.forEach(charge => {
+    const date = new Date(charge.created * 1000);
+    let periodKey;
+    
+    switch (groupBy) {
+      case 'daily':
+        periodKey = date.toISOString().substring(0, 10); // YYYY-MM-DD
+        break;
+      case 'weekly':
+        const startOfWeek = new Date(date);
+        startOfWeek.setDate(date.getDate() - date.getDay());
+        periodKey = startOfWeek.toISOString().substring(0, 10);
+        break;
+      case 'monthly':
+        periodKey = date.toISOString().substring(0, 7); // YYYY-MM
+        break;
+      case 'yearly':
+        periodKey = date.getFullYear().toString();
+        break;
+      default:
+        periodKey = 'all';
+    }
+    
+    if (!grouped[periodKey]) {
+      grouped[periodKey] = { revenue: 0, count: 0 };
+    }
+    
+    grouped[periodKey].revenue += charge.amount;
+    grouped[periodKey].count++;
+  });
+  
+  // Convert to array and add average order value
+  return Object.entries(grouped).map(([period, data]) => ({
+    period,
+    revenue: data.revenue / 100,
+    count: data.count,
+    averageOrderValue: data.count > 0 ? (data.revenue / data.count) / 100 : 0
+  })).sort((a, b) => a.period.localeCompare(b.period));
+}
+
+// Get top customers from charges
+function getTopCustomersFromCharges(charges, customers, limit = 10) {
+  const customerMap = {};
+  
+  charges.forEach(charge => {
+    const customerId = charge.customer;
+    if (!customerId) return;
+    
+    const customer = customers.find(c => c.id === customerId);
+    if (!customer) return;
+    
+    if (!customerMap[customerId]) {
+      customerMap[customerId] = {
+        userId: customerId,
+        name: customer.name || 'Unknown',
+        email: customer.email || 'Unknown',
+        totalSpent: 0,
+        totalOrders: 0,
+        firstPurchase: new Date(charge.created * 1000),
+        lastPurchase: new Date(charge.created * 1000)
+      };
+    }
+    
+    customerMap[customerId].totalSpent += charge.amount;
+    customerMap[customerId].totalOrders++;
+    
+    const chargeDate = new Date(charge.created * 1000);
+    if (chargeDate < customerMap[customerId].firstPurchase) {
+      customerMap[customerId].firstPurchase = chargeDate;
+    }
+    
+    if (chargeDate > customerMap[customerId].lastPurchase) {
+      customerMap[customerId].lastPurchase = chargeDate;
+    }
+  });
+  
+  return Object.values(customerMap)
+    .map(customer => ({
+      ...customer,
+      totalSpent: customer.totalSpent / 100
+    }))
+    .sort((a, b) => b.totalSpent - a.totalSpent)
+    .slice(0, limit);
+}
+
+// Calculate growth metrics from charges
+function calculateGrowthMetricsFromCharges(charges) {
+  if (charges.length === 0) {
+    return {
+      revenueGrowth: 0,
+      orderGrowth: 0,
+      previousPeriodRevenue: 0,
+      currentPeriodRevenue: 0,
+      previousPeriodOrders: 0,
+      currentPeriodOrders: 0
+    };
+  }
+  
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+  
+  const currentPeriodCharges = charges.filter(c => new Date(c.created * 1000) >= thirtyDaysAgo);
+  const previousPeriodCharges = charges.filter(c => {
+    const chargeDate = new Date(c.created * 1000);
+    return chargeDate >= sixtyDaysAgo && chargeDate < thirtyDaysAgo;
+  });
+  
+  const currentPeriodRevenue = currentPeriodCharges.reduce((sum, c) => sum + c.amount, 0);
+  const previousPeriodRevenue = previousPeriodCharges.reduce((sum, c) => sum + c.amount, 0);
+  
+  const revenueGrowth = previousPeriodRevenue > 0 
+    ? ((currentPeriodRevenue - previousPeriodRevenue) / previousPeriodRevenue) * 100
+    : 0;
+  
+  const orderGrowth = previousPeriodCharges.length > 0
+    ? ((currentPeriodCharges.length - previousPeriodCharges.length) / previousPeriodCharges.length) * 100
+    : 0;
+  
+  return {
+    revenueGrowth: revenueGrowth / 100,
+    orderGrowth,
+    previousPeriodRevenue: previousPeriodRevenue / 100,
+    currentPeriodRevenue: currentPeriodRevenue / 100,
+    previousPeriodOrders: previousPeriodCharges.length,
+    currentPeriodOrders: currentPeriodCharges.length
+  };
+}
+
+// Get Stripe balance and payout information
+exports.getStripeBalanceInfo = async function () {
+  try {
+    const balance = await stripe.balance.retrieve();
+    
+    // Get recent payouts
+    const payouts = await stripe.payouts.list({ limit: 10 });
+    
+    return {
+      available: balance.available.map(b => ({
+        amount: b.amount / 100,
+        currency: b.currency.toUpperCase()
+      })),
+      pending: balance.pending.map(b => ({
+        amount: b.amount / 100,
+        currency: b.currency.toUpperCase()
+      })),
+      recentPayouts: payouts.data.map(payout => ({
+        id: payout.id,
+        amount: payout.amount / 100,
+        currency: payout.currency.toUpperCase(),
+        status: payout.status,
+        arrivalDate: new Date(payout.arrival_date * 1000),
+        created: new Date(payout.created * 1000)
+      }))
+    };
+  } catch (error) {
+    console.error('Error getting Stripe balance info:', error);
+    throw error;
+  }
+};
+
+// Get Stripe transaction fees
+exports.getStripeFeeAnalytics = async function (startDate, endDate) {
+  try {
+    const startTimestamp = Math.floor(startDate.getTime() / 1000);
+    const endTimestamp = Math.floor(endDate.getTime() / 1000);
+    
+    // Get balance transactions which include fees
+    const balanceTransactions = await stripe.balanceTransactions.list({
+      created: {
+        gte: startTimestamp,
+        lte: endTimestamp
+      },
+      limit: 100
+    });
+    
+    const feeAnalytics = {
+      totalFees: 0,
+      stripeFees: 0,
+      applicationFees: 0,
+      transactionCount: 0
+    };
+    
+    balanceTransactions.data.forEach(transaction => {
+      if (transaction.type === 'charge') {
+        feeAnalytics.totalFees += transaction.fee;
+        feeAnalytics.transactionCount++;
+        
+        transaction.fee_details.forEach(fee => {
+          if (fee.type === 'stripe_fee') {
+            feeAnalytics.stripeFees += fee.amount;
+          } else if (fee.type === 'application_fee') {
+            feeAnalytics.applicationFees += fee.amount;
+          }
+        });
+      }
+    });
+    
+    return {
+      totalFees: feeAnalytics.totalFees / 100,
+      stripeFees: feeAnalytics.stripeFees / 100,
+      applicationFees: feeAnalytics.applicationFees / 100,
+      transactionCount: feeAnalytics.transactionCount,
+      averageFeePerTransaction: feeAnalytics.transactionCount > 0 
+        ? (feeAnalytics.totalFees / feeAnalytics.transactionCount) / 100 
+        : 0
+    };
+  } catch (error) {
+    console.error('Error getting Stripe fee analytics:', error);
+    throw error;
+  }
+};

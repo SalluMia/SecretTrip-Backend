@@ -82,3 +82,130 @@ exports.getUserPaymentHistory = async (req, res, next) => {
     next(err);
   }
 };
+
+
+// Get comprehensive admin revenue analytics directly from Stripe
+exports.getAdminRevenueAnalytics = async (req, res, next) => {
+  try {
+    const {
+      startDate,
+      endDate,
+      groupBy = 'monthly', // monthly, yearly, daily, weekly, all
+      period = 'all', // current-month, current-year, last-month, last-year, last-7-days, last-30-days, last-90-days, custom, all
+      timezone = 'UTC',
+      year, // for getting specific year data
+      includeBalance = 'false', // include Stripe balance info
+      includeFees = 'false' // include detailed fee breakdown
+    } = req.query;
+
+    // Validate groupBy parameter
+    const validGroupBy = ['monthly', 'yearly', 'daily', 'weekly', 'all'];
+    if (groupBy && !validGroupBy.includes(groupBy)) {
+      return errorResponse(res, 400, 'Invalid groupBy parameter. Must be one of: monthly, yearly, daily, weekly, all');
+    }
+
+    // Validate period parameter
+    const validPeriods = ['current-month', 'current-year', 'last-month', 'last-year', 'last-7-days', 'last-30-days', 'last-90-days', 'custom', 'all'];
+    if (period && !validPeriods.includes(period)) {
+      return errorResponse(res, 400, 'Invalid period parameter. Must be one of: ' + validPeriods.join(', '));
+    }
+
+    // Handle specific year filtering
+    let calculatedStartDate = startDate;
+    let calculatedEndDate = endDate;
+    
+    if (year) {
+      const targetYear = parseInt(year);
+      if (isNaN(targetYear) || targetYear < 2020 || targetYear > new Date().getFullYear()) {
+        return errorResponse(res, 400, 'Invalid year parameter');
+      }
+      calculatedStartDate = new Date(targetYear, 0, 1);
+      calculatedEndDate = new Date(targetYear, 11, 31, 23, 59, 59);
+    }
+
+    // Validate custom date parameters if period is custom
+    if (period === 'custom') {
+      if (!startDate || !endDate) {
+        return errorResponse(res, 400, 'startDate and endDate are required for custom period');
+      }
+      
+      if (!isValidDate(startDate) || !isValidDate(endDate)) {
+        return errorResponse(res, 400, 'Invalid date format. Use YYYY-MM-DD');
+      }
+
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+
+      if (start > end) {
+        return errorResponse(res, 400, 'startDate cannot be after endDate');
+      }
+    }
+
+    // Get main analytics from Stripe
+    const analytics = await paymentService.getAdminRevenueAnalytics({
+      startDate: calculatedStartDate,
+      endDate: calculatedEndDate,
+      groupBy,
+      period,
+      timezone
+    });
+
+    // Add additional Stripe data if requested
+    const additionalData = {};
+
+    if (includeBalance === 'true') {
+      try {
+        additionalData.balanceInfo = await paymentService.getStripeBalanceInfo();
+      } catch (error) {
+        console.error('Error fetching balance info:', error);
+        additionalData.balanceInfo = null;
+      }
+    }
+
+    if (includeFees === 'true' && calculatedStartDate && calculatedEndDate) {
+      try {
+        additionalData.feeAnalytics = await paymentService.getStripeFeeAnalytics(
+          new Date(calculatedStartDate), 
+          new Date(calculatedEndDate)
+        );
+      } catch (error) {
+        console.error('Error fetching fee analytics:', error);
+        additionalData.feeAnalytics = null;
+      }
+    }
+
+    // Combine all data
+    const responseData = {
+      ...analytics,
+      ...additionalData,
+      filters: {
+        groupBy,
+        period,
+        year: year || null,
+        timezone,
+        customDateRange: period === 'custom' ? { startDate, endDate } : null,
+        includeBalance: includeBalance === 'true',
+        includeFees: includeFees === 'true'
+      },
+      generatedAt: new Date().toISOString(),
+      dataSource: 'stripe'
+    };
+
+    successResponse(res, 200, 'Stripe revenue analytics retrieved successfully', responseData);
+  } catch (err) {
+    // Handle Stripe API errors specifically
+    if (err.type === 'StripeError') {
+      return errorResponse(res, 400, `Stripe API Error: ${err.message}`);
+    }
+    next(err);
+  }
+};
+
+// Helper function to validate date format
+function isValidDate(dateString) {
+  const regex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!regex.test(dateString)) return false;
+  
+  const date = new Date(dateString);
+  return date instanceof Date && !isNaN(date);
+}

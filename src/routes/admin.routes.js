@@ -3,7 +3,7 @@ const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const auth = require('../middlewares/auth');
 const isAdmin = require('../middlewares/isAdmin');
-
+const paymentController=require('../controllers/payment.controller')
 router.use(auth);      
 router.use(isAdmin);  
 
@@ -46,5 +46,7 @@ router.post('/albums/generate/:tripId', adminController.generateAlbum);
 router.post('/payments/:paymentId/refund', adminController.refundPayment);
 router.post('/trips/:tripId/activate-manual', adminController.manuallyActivateTrip);
 
+
+router.get('/payment/analytics', paymentController.getAdminRevenueAnalytics);
 
 module.exports = router;
