@@ -111,7 +111,7 @@ exports.getUserProfile = async ({ userId }) => {
 exports.updateProfile = async ({ userId, displayName, travelInterests, profilePhotoPath }) => {
   const existingUser = await prisma.user.findUnique({ 
     where: { id: userId },
-    select: { id: true, profilePhotoUrl: true }
+    select: { id: true, profilePhotoUrl: true, displayName: true }
   });
 
   if (!existingUser) {
@@ -120,13 +120,32 @@ exports.updateProfile = async ({ userId, displayName, travelInterests, profilePh
 
   const updateData = {};
 
-  if (displayName) {
-    updateData.displayName = displayName;
+  // ✅ Handle displayName update with validation
+  if (displayName !== undefined) {
+    if (typeof displayName !== 'string') {
+      throw new Error('Display name must be a string');
+    }
+    
+    const trimmedDisplayName = displayName.trim();
+    
+    if (trimmedDisplayName.length === 0) {
+      throw new Error('Display name cannot be empty');
+    }
+    
+    if (trimmedDisplayName.length > 50) {
+      throw new Error('Display name cannot exceed 50 characters');
+    }
+    
+    updateData.displayName = trimmedDisplayName;
   }
 
   // ✅ Handle dynamic interests
-  if (travelInterests) {
-    if (!Array.isArray(travelInterests) || travelInterests.length === 0) {
+  if (travelInterests !== undefined) {
+    if (!Array.isArray(travelInterests)) {
+      throw new Error('Travel interests must be an array');
+    }
+    
+    if (travelInterests.length === 0) {
       throw new Error('Please select at least one travel interest');
     }
 
@@ -163,6 +182,11 @@ exports.updateProfile = async ({ userId, displayName, travelInterests, profilePh
     updateData.profilePhotoUrl = `/uploads/profile-photos/${path.basename(profilePhotoPath)}`;
   }
 
+  // Only update if there's something to update
+  if (Object.keys(updateData).length === 0) {
+    throw new Error('No valid fields provided for update');
+  }
+
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: updateData,
@@ -173,6 +197,7 @@ exports.updateProfile = async ({ userId, displayName, travelInterests, profilePh
       profilePhotoUrl: true,
       isProfileCompleted: true,
       role: true,
+      createdAt: true,
       interests: {
         select: { id: true, name: true }
       }

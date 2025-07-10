@@ -895,6 +895,7 @@ exports.getTripsByStatus = async ({ userId, status }) => {
       name: trip.name,
       theme: trip.theme,
       description: trip.description,
+      location:trip.location,
       startDate: trip.startDate,
       endDate: trip.endDate,
       status: trip.status,
@@ -942,6 +943,7 @@ exports.getTripDetails = async ({ userId, tripId }) => {
     id: trip.id,
     name: trip.name,
     description: trip.description || '',
+    location:trip.location,
     theme: trip.theme,
     startDate: trip.startDate,
     endDate: trip.endDate,
@@ -1626,6 +1628,80 @@ exports.getTripCompletedMissions = async ({ tripId, userId }) => {
       retrievedAt: new Date().toISOString(),
       hasMissions: totalCompletedCount > 0
     }
+  };
+};
+
+exports.getUserCompletedMissionsHistory = async ({ userId }) => {
+  const completedMissions = await prisma.assignedMission.findMany({
+    where: {
+      userId,
+      completed: true
+    },
+    include: {
+      trip: {
+        select: {
+          id: true,
+          name: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+          creatorId: true
+        }
+      },
+      missionTemplate: {
+        select: {
+          id: true,
+          title: true,
+          instruction: true,
+          category: true,
+          level: true,
+          location: true,
+          sampleImageUrl: true,
+          isActive: true
+        }
+      }
+    },
+    orderBy: [
+      { submittedAt: 'desc' },
+      { createdAt: 'asc' }
+    ]
+  });
+
+  // Transform missions data
+  const historyMissions = completedMissions.map(mission => ({
+    id: mission.id,
+    missionTemplateId: mission.missionTemplateId,
+    completed: mission.completed,
+    submittedAt: mission.submittedAt,
+    photoUrl: mission.photoUrl,
+    thumbnailUrl: mission.thumbnailUrl,
+    caption: mission.caption,
+    dayAssigned: mission.dayAssigned,
+    createdAt: mission.createdAt,
+
+    // Mission details (prefer template data)
+    title: mission.missionTemplate?.title || mission.title,
+    instruction: mission.missionTemplate?.instruction || mission.instruction,
+    category: mission.missionTemplate?.category || mission.category,
+    level: mission.missionTemplate?.level || 'NORMAL',
+    location: mission.missionTemplate?.location,
+    sampleImageUrl: mission.missionTemplate?.sampleImageUrl || mission.sampleImageUrl,
+
+    // Trip details
+    trip: mission.trip ? {
+      id: mission.trip.id,
+      name: mission.trip.name,
+      startDate: mission.trip.startDate,
+      endDate: mission.trip.endDate,
+      status: mission.trip.status,
+      creatorId: mission.trip.creatorId
+    } : null
+  }));
+
+  // Return the desired structure
+  return {
+    historyMission: historyMissions,
+    totalCount: historyMissions.length
   };
 };
 

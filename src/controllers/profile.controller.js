@@ -71,7 +71,7 @@ exports.updateProfile = async (req, res, next) => {
 
     const data = await profileService.updateProfile({
       userId,
-      displayName,
+      displayName: displayName?.trim(), // Trim whitespace
       travelInterests: parsedInterests,
       profilePhotoPath
     });

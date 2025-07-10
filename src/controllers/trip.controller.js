@@ -676,3 +676,17 @@ exports.getTripCompletedMissions = async (req, res, next) => {
   }
 };
 
+exports.getUserCompletedMissionsHistory = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    // Get all completed missions with trip info
+    const missions = await tripService.getUserCompletedMissionsHistory({ userId });
+
+    return res.status(200).json(missions);
+  } catch (err) {
+    console.error('Error fetching completed missions history:', err);
+    next(err);
+  }
+};
+

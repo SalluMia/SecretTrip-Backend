@@ -15,6 +15,7 @@ router.put('/:tripId', tripController.editTrip);
 router.delete('/:tripId', tripController.deleteTrip);
 router.post('/:tripId/leave', tripController.leaveTrip); // Leave trip
 router.get('/:tripId/completed-missions', tripController.getTripCompletedMissions);
+router.get('/history-missions', tripController.getUserCompletedMissionsHistory);
 // Trip management
 router.get('/my', tripController.getMyTrips);
 router.get('/status', tripController.getTripsByStatus); 
