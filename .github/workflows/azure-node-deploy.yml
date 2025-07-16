@@ -1,3 +1,43 @@
+# name: Deploy Node.js app to Azure
+
+# on:
+#   push:
+#     branches:
+#       - main
+
+# jobs:
+#   build-and-deploy:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       - name: Set up Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: '20'
+#           cache: 'npm'
+
+#       - name: Install dependencies
+#         run: npm install
+
+#       - name: Generate Prisma Client
+#         run: npx prisma generate
+
+#       - name: Azure Login
+#         uses: azure/login@v2
+#         with:
+#           creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+#       - name: Deploy to Azure Web App
+#         uses: azure/webapps-deploy@v2
+#         with:
+#           app-name: secrettripe-server
+#           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
+#           package: .
+
+
 name: Deploy Node.js app to Azure
 
 on:
@@ -19,20 +59,69 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
+      # Validate package.json has required dependencies
+      - name: Validate package.json
+        run: |
+          if ! grep -q '"cors"' package.json; then
+            echo "ERROR: cors not found in package.json!"
+            exit 1
+          fi
+          echo "✓ cors found in package.json"
+          
+      # Install dependencies locally for validation only
+      - name: Install dependencies (validation)
         run: npm install
 
-      - name: Generate Prisma Client
-        run: npx prisma generate
+      # Validate that cors is installed locally
+      - name: Validate dependencies
+        run: |
+          if [ ! -d "node_modules/cors" ]; then
+            echo "ERROR: cors module not found!"
+            exit 1
+          fi
+          echo "✓ cors module found"
+
+      # Create deployment package WITHOUT node_modules (Azure will handle it)
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy
+          # Copy source files but exclude node_modules and dev files
+          rsync -av \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='*.log' \
+            --exclude='.env.local' \
+            --exclude='.DS_Store' \
+            . deploy/
+          
+          # Ensure .deployment file is included
+          if [ -f ".deployment" ]; then
+            echo "✓ .deployment file found"
+          else
+            echo "ERROR: .deployment file not found!"
+            exit 1
+          fi
 
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # Set build configuration via Azure CLI
+      - name: Configure Azure App Settings
+        run: |
+          az webapp config appsettings set \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name secrettripe-server \
+            --settings \
+              SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+              ENABLE_ORYX_BUILD=true \
+              POST_BUILD_COMMAND="npx prisma generate"
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
           app-name: secrettripe-server
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
-          package: .
+          package: ./deploy
