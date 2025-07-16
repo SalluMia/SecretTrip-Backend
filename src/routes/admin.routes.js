@@ -4,6 +4,10 @@ const adminController = require('../controllers/admin.controller');
 const auth = require('../middlewares/auth');
 const isAdmin = require('../middlewares/isAdmin');
 const paymentController=require('../controllers/payment.controller')
+
+
+router.get('/get-privacy-policy', adminController.getPrivacyPolicy);
+
 router.use(auth);      
 router.use(isAdmin);  
 
