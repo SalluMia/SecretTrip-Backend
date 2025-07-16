@@ -688,14 +688,11 @@ exports.swapMission = async ({ missionId, userId }) => {
     throw new Error('Cannot swap this mission');
   }
 
-  // Get available templates of same category, excluding current one
   const availableTemplates = await prisma.missionTemplate.findMany({
     where: {
       category: mission.missionTemplate?.category || mission.category,
       isActive: true,
-      NOT: { 
-        id: mission.missionTemplateId 
-      }
+      NOT: { id: mission.missionTemplateId }
     }
   });
 
@@ -705,21 +702,22 @@ exports.swapMission = async ({ missionId, userId }) => {
 
   const newTemplate = availableTemplates[Math.floor(Math.random() * availableTemplates.length)];
 
-  // ✅ Update with new template reference
-  return await prisma.assignedMission.update({
-    where: { id: missionId },
-    data: {
-      missionTemplateId: newTemplate.id, // ✅ UPDATE TEMPLATE REFERENCE
-      title: newTemplate.title,
-      instruction: newTemplate.instruction,
-      category: newTemplate.category,
-      sampleImageUrl: newTemplate.sampleImageUrl
-    },
-    include: {
-      missionTemplate: true // ✅ RETURN WITH TEMPLATE DATA
+return await prisma.assignedMission.update({
+  where: { id: missionId },
+  data: {
+    missionTemplate: {
+      connect: {
+        id: newTemplate.id
+      }
     }
-  });
+  },
+  include: {
+    missionTemplate: true
+  }
+});
+
 };
+
 
 // ✅ Submit mission photo (no changes needed, but included for completeness)
 exports.submitMissionPhoto = async ({ missionId, userId, photoUrl, caption }) => {
