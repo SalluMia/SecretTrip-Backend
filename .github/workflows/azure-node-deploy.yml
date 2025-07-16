@@ -1,3 +1,42 @@
+# name: Deploy Node.js app to Azure
+
+# on:
+#   push:
+#     branches:
+#       - main
+
+# jobs:
+#   build-and-deploy:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       - name: Set up Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: '20'
+#           cache: 'npm'
+
+#       - name: Install dependencies
+#         run: npm install
+
+#       - name: Generate Prisma Client
+#         run: npx prisma generate
+
+#       - name: Azure Login
+#         uses: azure/login@v2
+#         with:
+#           creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+#       - name: Deploy to Azure Web App
+#         uses: azure/webapps-deploy@v2
+#         with:
+#           app-name: secrettripe-server
+#           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
+#           package: .
+
 name: Deploy Node.js app to Azure
 
 on:
@@ -19,11 +58,14 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm install
+      - name: Clean install dependencies
+        run: npm ci
 
       - name: Generate Prisma Client
         run: npx prisma generate
+
+      - name: Remove node_modules.tar.gz if exists
+        run: rm -f node_modules.tar.gz
 
       - name: Azure Login
         uses: azure/login@v2

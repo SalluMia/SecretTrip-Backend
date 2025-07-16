@@ -18,6 +18,7 @@ const app = express();
 // ✅ Allowed origins list
 const allowedOrigins = [
   process.env.FRONTEND_URL,
+  'https://wonderful-cobbler-ff3a9e.netlify.app/',
   'http://localhost:5174',
   'http://localhost:65028',
 ];
