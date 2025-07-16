@@ -7,11 +7,10 @@
     "node": ">=20.0.0",
     "npm": ">=9.0.0"
   },
-"scripts": {
+  "scripts": {
     "postinstall": "prisma generate",
     "start": "node src/app.js",
-    "dev": "npm run prisma:generate && nodemon src/app.js",
-    "build": "npm install --production && npx prisma generate"
+    "dev": "npm run prisma:generate && nodemon src/app.js"
   },
   "keywords": [],
   "author": "",
