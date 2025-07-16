@@ -10,7 +10,7 @@
   "scripts": {
     "postinstall": "prisma generate",
     "start": "node src/app.js",
-    "dev": "npx run prisma:generate && nodemon src/app.js"
+    "dev": "npm run prisma:generate && nodemon src/app.js"
   },
   "keywords": [],
   "author": "",
