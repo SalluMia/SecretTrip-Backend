@@ -37,7 +37,7 @@
 #           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
 #           package: .
 
-name: Deploy Node.js app to Azure
+name: Clean Deploy Node.js to Azure
 
 on:
   push:
@@ -58,16 +58,19 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Clean existing node_modules and lock file
+      - name: Clean install dependencies
         run: |
-          rm -rf node_modules
-          rm -f package-lock.json
-
-      - name: Install dependencies
-        run: npm install
+          rm -rf node_modules package-lock.json
+          npm install
 
       - name: Generate Prisma Client
         run: npx prisma generate
+
+      - name: Archive production build (excluding node_modules)
+        run: |
+          mkdir deploy-package
+          cp -r ./* ./deploy-package/
+          rm -rf ./deploy-package/node_modules
 
       - name: Azure Login
         uses: azure/login@v2
@@ -79,4 +82,4 @@ jobs:
         with:
           app-name: secrettripe-server
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
-          package: .
+          package: ./deploy-package
