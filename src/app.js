@@ -18,7 +18,8 @@ const app = express();
 // ✅ Allowed origins list
 const allowedOrigins = [
   process.env.FRONTEND_URL,
-  'https://wonderful-cobbler-ff3a9e.netlify.app/',
+  process.env.ADMIN_URL,
+  'https://wonderful-cobbler-ff3a9e.netlify.app',
   'http://localhost:5174',
   'http://localhost:65028',
 ];
@@ -26,17 +27,12 @@ const allowedOrigins = [
 // ✅ CORS setup
 const corsOptions = {
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) {
-      // Allow requests like Postman or curl
       return callback(null, true);
     }
 
     if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    // Optional wildcard fallback (no credentials in this case)
-    if (origin === '*') {
       return callback(null, true);
     }
 
@@ -45,8 +41,11 @@ const corsOptions = {
   },
   credentials: true,
   exposedHeaders: ['Content-Disposition'], // for file downloads
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 };
 
+// ✅ Use the properly configured CORS options
 app.use(cors(corsOptions));
 
 // ✅ Body parsing middleware
@@ -57,6 +56,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // app.use('/uploads/mission-photos', express.static(path.join(__dirname, 'uploads/mission-photos')));
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+
 // ✅ Session setup
 app.use(session({
   secret: process.env.SESSION_SECRET || 'secret',
