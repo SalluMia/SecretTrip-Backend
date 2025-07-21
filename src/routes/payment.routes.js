@@ -8,7 +8,13 @@ router.post('/stripe/webhook', express.raw({ type: 'application/json' }), paymen
 
 router.use(auth); // Protect other payment routes
 
-// Create payment intent for HD album
+// Unified direct payment processing
+router.post('/direct', paymentController.processDirectPayment);
+
+// Check HD album availability for trip
+router.get('/hd-availability/:tripId', paymentController.checkHDAvailability);
+
+// Create payment intent for HD album (legacy)
 router.post('/hd-album', paymentController.createHDAlbumPayment);
 
 // Get payment status

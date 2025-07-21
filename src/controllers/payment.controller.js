@@ -35,23 +35,47 @@ exports.handleStripeWebhook = async (req, res, next) => {
     // Verify webhook signature
     const event = paymentService.verifyWebhookSignature(payload, signature);
 
+    console.log(`📦 Webhook received: ${event.type}`);
+
     // Handle different event types
     switch (event.type) {
       case 'payment_intent.succeeded':
+        console.log('✅ Payment succeeded, updating status...');
         await paymentService.handlePaymentSuccess(event.data.object.id);
         break;
       
       case 'payment_intent.payment_failed':
+        console.log('❌ Payment failed, updating status...');
         await paymentService.handlePaymentFailure(event.data.object.id);
+        break;
+
+      case 'payment_intent.canceled':
+        console.log('🚫 Payment canceled, updating status...');
+        await paymentService.handlePaymentCanceled(event.data.object.id);
+        break;
+
+      case 'charge.succeeded':
+        console.log('💳 Charge succeeded, ensuring payment status is updated...');
+        await paymentService.handleChargeSuccess(event.data.object.payment_intent);
+        break;
+
+      case 'charge.failed':
+        console.log('💳 Charge failed, updating payment status...');
+        await paymentService.handleChargeFailure(event.data.object.payment_intent);
+        break;
+
+      case 'charge.refunded':
+        console.log('💰 Charge refunded, updating payment status...');
+        await paymentService.handleChargeRefunded(event.data.object.payment_intent);
         break;
       
       default:
-        console.log(`Unhandled event type: ${event.type}`);
+        console.log(`📝 Unhandled event type: ${event.type}`);
     }
 
-    res.json({ received: true });
+    res.json({ received: true, eventType: event.type });
   } catch (err) {
-    console.error('Webhook error:', err.message);
+    console.error('❌ Webhook error:', err.message);
     res.status(400).send(`Webhook Error: ${err.message}`);
   }
 };
@@ -197,6 +221,47 @@ exports.getAdminRevenueAnalytics = async (req, res, next) => {
     if (err.type === 'StripeError') {
       return errorResponse(res, 400, `Stripe API Error: ${err.message}`);
     }
+    next(err);
+  }
+};
+
+// Unified direct payment processing
+exports.processDirectPayment = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { tripId, albumId, amount } = req.body;
+
+    // Validation
+    if (!tripId || !albumId) {
+      return errorResponse(res, 400, 'Trip ID and Album ID are required');
+    }
+
+    if (!amount || amount < 100) { // Minimum 1 euro in cents
+      return errorResponse(res, 400, 'Valid amount is required (minimum €1.00)');
+    }
+
+    const paymentResult = await paymentService.processDirectPayment({
+      userId,
+      tripId,
+      albumId,
+      amount
+    });
+
+    successResponse(res, 200, 'Payment processed successfully', paymentResult);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Check if HD album is available for trip
+exports.checkHDAvailability = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { tripId } = req.params;
+
+    const availability = await paymentService.checkHDAvailability(userId, tripId);
+    successResponse(res, 200, 'HD album availability checked', availability);
+  } catch (err) {
     next(err);
   }
 };

@@ -238,3 +238,14 @@ exports.resetPassword = async (req, res, next) => {
     next(err);
   }
 };
+
+// Delete user account
+exports.deleteAccount = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const data = await authService.deleteAccount({ userId});
+    successResponse(res, 200, 'Account deleted successfully', data);
+  } catch (err) {
+    next(err);
+  }
+};

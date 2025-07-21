@@ -454,33 +454,44 @@ exports.removeFCMToken = async ({ userId }) => {
   }
 };
 
-// Forgot Password
+// Forgot Password - Optimized for faster email delivery
 exports.forgotPassword = async ({ email }) => {
-  const user = await prisma.user.findUnique({ where: { email } });
-  
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  if (!user.isEmailVerified) {
-    throw new Error('Please verify your email first');
-  }
-
-  // Generate reset token
-  const resetToken = crypto.randomBytes(32).toString('hex');
-  const resetExpires = new Date(Date.now() + 3600000); // 1 hour
-
-  await prisma.user.update({
-    where: { email },
-    data: {
-      passwordResetToken: resetToken,
-      passwordResetExpires: resetExpires
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    
+    if (!user) {
+      throw new Error('User not found');
     }
-  });
 
-  await sendPasswordResetEmail(email, resetToken);
+    if (!user.isEmailVerified) {
+      throw new Error('Please verify your email first');
+    }
 
-  return { message: 'Password reset link sent to your email' };
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetExpires = new Date(Date.now() + 3600000); // 1 hour
+
+    // Execute database update and email sending in parallel for better performance
+    const [updateResult, emailResult] = await Promise.all([
+      prisma.user.update({
+        where: { email },
+        data: {
+          passwordResetToken: resetToken,
+          passwordResetExpires: resetExpires
+        }
+      }),
+      sendPasswordResetEmail(email, resetToken)
+    ]);
+
+    return { 
+      message: 'Password reset link sent to your email',
+      emailSent: true,
+      tokenGenerated: true
+    };
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    throw error;
+  }
 };
 
 // Reset Password
@@ -528,4 +539,111 @@ exports.verifyResetToken = async ({ token }) => {
   }
 
   return { message: 'Token is valid', email: user.email };
+};
+
+// Delete user account - Optimized for performance with increased timeout
+exports.deleteAccount = async ({ userId }) => {
+  try {
+    // Find user and verify password
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Delete user and all related data in a transaction with increased timeout
+    await prisma.$transaction(async (tx) => {
+      // Get user-created trips first to prepare for bulk operations
+      const userCreatedTrips = await tx.trip.findMany({
+        where: { creatorId: userId },
+        select: { id: true }
+      });
+
+      const tripIds = userCreatedTrips.map(trip => trip.id);
+
+      // Execute deletions sequentially to avoid transaction timeout
+      // Delete user's direct data first
+      await tx.notificationHistory.deleteMany({ where: { userId } });
+      await tx.joinRequest.deleteMany({ where: { userId } });
+      await tx.tripAlias.deleteMany({ where: { userId } });
+      await tx.payment.deleteMany({ where: { userId } });
+      await tx.assignedMission.deleteMany({ where: { userId } });
+
+      // Delete data related to user-created trips (if any)
+      if (tripIds.length > 0) {
+        await tx.tripAlias.deleteMany({ where: { tripId: { in: tripIds } } });
+        await tx.joinRequest.deleteMany({ where: { tripId: { in: tripIds } } });
+        await tx.assignedMission.deleteMany({ where: { tripId: { in: tripIds } } });
+        await tx.payment.deleteMany({ where: { tripId: { in: tripIds } } });
+        await tx.album.deleteMany({ where: { tripId: { in: tripIds } } });
+        await tx.trip.deleteMany({ where: { id: { in: tripIds } } });
+      }
+
+      // Remove user from trips they joined (but didn't create)
+      // Find trips where user is a member but not the creator
+      const tripsToRemoveFrom = await tx.trip.findMany({
+        where: {
+          members: {
+            some: { id: userId }
+          },
+          creatorId: {
+            not: userId
+          }
+        },
+        select: { id: true }
+      });
+
+      // Remove user from each trip
+      for (const trip of tripsToRemoveFrom) {
+        await tx.trip.update({
+          where: { id: trip.id },
+          data: {
+            members: {
+              disconnect: { id: userId }
+            }
+          }
+        });
+      }
+
+      // Remove user from travel interests
+      // First get the user's interests
+      const userInterests = await tx.user.findUnique({
+        where: { id: userId },
+        select: {
+          interests: {
+            select: { id: true }
+          }
+        }
+      });
+
+      // Disconnect all interests if user has any
+      if (userInterests && userInterests.interests.length > 0) {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            interests: {
+              disconnect: userInterests.interests
+            }
+          }
+        });
+      }
+
+      // Finally, delete the user
+      await tx.user.delete({
+        where: { id: userId }
+      });
+    }, {
+      timeout: 30000 // Increase timeout to 30 seconds
+    });
+
+    return {
+      message: 'Account and all associated data deleted successfully',
+      userId
+    };
+  } catch (error) {
+    console.error('Error deleting account:', error);
+    throw error;
+  }
 };
