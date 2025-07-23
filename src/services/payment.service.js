@@ -7,6 +7,16 @@ const CURRENCY = 'eur';
 
 exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, amount }) {
   try {
+    console.log(`🔍 Creating payment intent for - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Amount: ${amount}`);
+    
+    // Convert amount to integer and validate
+    const amountInt = parseInt(amount);
+    if (!amountInt || amountInt <= 0) {
+      throw new Error('Valid amount is required');
+    }
+    
+    console.log(`💰 Amount converted to integer: ${amountInt} cents`);
+
     const trip = await prisma.trip.findFirst({
       where: {
         id: tripId,
@@ -18,8 +28,17 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, 
       }
     });
 
-    if (!trip) throw new Error('Trip not found or access denied');
-    if (!trip.album || trip.album.id !== albumId) throw new Error('Album not found for this trip');
+    if (!trip) {
+      console.log(`❌ Trip not found or user not a member - Trip: ${tripId}, User: ${userId}`);
+      throw new Error('Trip not found or access denied');
+    }
+    
+    console.log(`✅ Trip found: ${trip.name}, User is a member`);
+
+    if (!trip.album || trip.album.id !== albumId) {
+      console.log(`❌ Album not found for trip - Expected: ${albumId}, Found: ${trip.album?.id}`);
+      throw new Error('Album not found for this trip');
+    }
 
     const existingPayment = await prisma.payment.findFirst({
       where: {
@@ -29,15 +48,20 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, 
       }
     });
 
-    if (existingPayment) throw new Error('HD album already purchased for this trip');
+    if (existingPayment) {
+      console.log(`❌ HD album already purchased for trip: ${tripId}`);
+      throw new Error('HD album already purchased for this trip');
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { email: true, displayName: true }
     });
 
+    console.log(`💳 Creating Stripe payment intent for amount: ${amountInt} cents (€${(amountInt/100).toFixed(2)})`);
+
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: amount,
+      amount: amountInt,
       currency: CURRENCY,
       automatic_payment_methods: { enabled: true },
       metadata: {
@@ -53,27 +77,31 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, 
       receipt_email: user.email
     });
 
+    console.log(`✅ Stripe payment intent created: ${paymentIntent.id}`);
+
     const payment = await prisma.payment.create({
       data: {
         userId,
         tripId,
         type: 'album_hd',
-        amount: amount,
+        amount: amountInt,
         currency: CURRENCY,
         status: 'pending',
         stripePaymentIntentId: paymentIntent.id
       }
     });
 
+    console.log(`✅ Payment record created: ${payment.id}`);
+
     return {
       paymentIntentId: paymentIntent.id,
       clientSecret: paymentIntent.client_secret,
-      amount: amount,
+      amount: amountInt,
       currency: CURRENCY,
       paymentId: payment.id
     };
   } catch (error) {
-    console.error('Error creating payment intent:', error);
+    console.error('❌ Error creating payment intent:', error);
     throw error;
   }
 };
