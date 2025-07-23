@@ -8,16 +8,17 @@ const { successResponse, errorResponse } = require('../utils/response');
 exports.createHDAlbumPayment = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { tripId, albumId } = req.body;
+    const { tripId, albumId ,amount} = req.body;
 
-    if (!tripId || !albumId) {
+    if (!tripId || !albumId || !amount) {
       return errorResponse(res, 400, 'Trip ID and Album ID are required');
     }
 
     const paymentIntent = await paymentService.createHDAlbumPaymentIntent({
       userId,
       tripId,
-      albumId
+      albumId,
+      amount
     });
 
     successResponse(res, 200, 'Payment intent created', paymentIntent);

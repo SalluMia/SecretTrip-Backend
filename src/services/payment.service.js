@@ -5,7 +5,7 @@ const { prisma } = require('../config/prisma');
 const HD_ALBUM_PRICE = 299; // in cents (€2.99)
 const CURRENCY = 'eur';
 
-exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId }) {
+exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, amount }) {
   try {
     const trip = await prisma.trip.findFirst({
       where: {
@@ -37,7 +37,7 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId }
     });
 
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: HD_ALBUM_PRICE,
+      amount: amount,
       currency: CURRENCY,
       automatic_payment_methods: { enabled: true },
       metadata: {
@@ -58,7 +58,7 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId }
         userId,
         tripId,
         type: 'album_hd',
-        amount: HD_ALBUM_PRICE,
+        amount: amount,
         currency: CURRENCY,
         status: 'pending',
         stripePaymentIntentId: paymentIntent.id
@@ -68,7 +68,7 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId }
     return {
       paymentIntentId: paymentIntent.id,
       clientSecret: paymentIntent.client_secret,
-      amount: HD_ALBUM_PRICE,
+      amount: amount,
       currency: CURRENCY,
       paymentId: payment.id
     };
