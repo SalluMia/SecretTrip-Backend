@@ -20,7 +20,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.ADMIN_URL,
   'https://wonderful-cobbler-ff3a9e.netlify.app',
-  'http://localhost:5174',
+  'http://localhost:5173',
   'http://localhost:65028',
 ];
 

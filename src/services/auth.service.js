@@ -571,7 +571,7 @@ exports.deleteAccount = async ({ userId }) => {
       await tx.payment.deleteMany({ where: { userId } });
       await tx.assignedMission.deleteMany({ where: { userId } });
 
-      // Delete data related to user-created trips (if any)
+        // Delete data related to user-created trips (if any)
       if (tripIds.length > 0) {
         await tx.tripAlias.deleteMany({ where: { tripId: { in: tripIds } } });
         await tx.joinRequest.deleteMany({ where: { tripId: { in: tripIds } } });
@@ -581,17 +581,17 @@ exports.deleteAccount = async ({ userId }) => {
         await tx.trip.deleteMany({ where: { id: { in: tripIds } } });
       }
 
-      // Remove user from trips they joined (but didn't create)
+        // Remove user from trips they joined (but didn't create)
       // Find trips where user is a member but not the creator
       const tripsToRemoveFrom = await tx.trip.findMany({
-        where: {
-          members: {
-            some: { id: userId }
+          where: {
+            members: {
+              some: { id: userId }
           },
           creatorId: {
             not: userId
-          }
-        },
+            }
+          },
         select: { id: true }
       });
 
@@ -607,7 +607,7 @@ exports.deleteAccount = async ({ userId }) => {
         });
       }
 
-      // Remove user from travel interests
+        // Remove user from travel interests
       // First get the user's interests
       const userInterests = await tx.user.findUnique({
         where: { id: userId },

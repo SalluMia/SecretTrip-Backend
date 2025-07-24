@@ -160,6 +160,7 @@ model Album {
   pdfUrl    String
   pdfHDUrl  String?
   printed   Boolean   @default(false)
+  hdAccess  Boolean   @default(false) // HD album access flag
   expiresAt DateTime? // When free access expires
   createdAt DateTime  @default(now())
   updatedAt DateTime?
@@ -175,7 +176,7 @@ model Payment {
   amount                Int // Amount in cents
   currency              String   @default("EUR")
   status                String // "pending", "completed", "failed", "refunded"
-  stripePaymentIntentId String? // Stripe payment ID
+  stripePaymentIntentId String? @unique // Stripe payment ID
   timestamp             DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])

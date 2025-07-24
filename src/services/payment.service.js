@@ -5,6 +5,125 @@ const { prisma } = require('../config/prisma');
 const HD_ALBUM_PRICE = 299; // in cents (€2.99)
 const CURRENCY = 'eur';
 
+// New function to handle direct payment success
+exports.handleDirectPaymentSuccess = async function ({ userId, tripId, albumId, paymentIntentId, amount }) {
+  try {
+    console.log(`🎉 Processing direct payment success - User: ${userId}, Trip: ${tripId}, Album: ${albumId}`);
+    
+    // Verify payment intent with Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    
+    if (paymentIntent.status !== 'succeeded') {
+      console.log(`⚠️ Payment intent status is ${paymentIntent.status}, not succeeded`);
+      throw new Error('Payment not successful');
+    }
+
+    console.log(`✅ Payment verified with Stripe: ${paymentIntentId}`);
+
+    // Update payment status to completed using the unique stripePaymentIntentId
+    const updatedPayment = await prisma.payment.update({
+      where: { stripePaymentIntentId: paymentIntentId },
+      data: { status: 'completed' }
+    });
+    console.log(`✅ Payment status updated to 'completed' for payment ID: ${updatedPayment.id}`);
+
+    // Update album with HD access flag and HD URL
+    const albumService = require('./album.service');
+    console.log(`🖼️ Generating HD album for album ID: ${albumId}`);
+    const hdPdfUrl = await albumService.generateHDVersion(albumId);
+    console.log(`📄 HD album generated successfully: ${hdPdfUrl}`);
+
+    // Update album with HD access
+    const updatedAlbum = await prisma.album.update({
+      where: { id: albumId },
+      data: {
+        pdfHDUrl: hdPdfUrl,
+        // Add HD access flag - we'll add this field to the schema
+        hdAccess: true
+      }
+    });
+    console.log(`✅ Album updated with HD access: ${updatedAlbum.id}`);
+
+    // Get trip details for notifications
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: { members: true, tripAliases: true }
+    });
+
+    const purchaser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { displayName: true }
+    });
+
+    console.log(`👥 Sending notifications to ${trip.members.length} trip members`);
+
+    // Send notifications to all trip members
+    const notificationService = require('./notification.service');
+    const notificationPromises = trip.members.map(async (member) => {
+      const alias = trip.tripAliases.find(ta => ta.userId === member.id)?.alias || 'Agent';
+      try {
+        await notificationService.sendHDAlbumAvailableNotification({
+          userId: member.id,
+          tripName: trip.name,
+          alias,
+          purchaserName: purchaser.displayName,
+          albumId
+        });
+        console.log(`📱 Notification sent to user ${member.id} (${alias})`);
+      } catch (notifError) {
+        console.error(`❌ Failed to send HD album notification to user ${member.id}:`, notifError);
+      }
+    });
+
+    // Send notifications in parallel
+    await Promise.all(notificationPromises);
+
+    console.log(`🎉 Direct payment success processed - HD album unlocked for trip ${trip.name}`);
+
+    return {
+      success: true,
+      hdPdfUrl,
+      message: 'HD album unlocked for all trip members',
+      paymentId: updatedPayment.id,
+      paymentStatus: 'completed',
+      tripName: trip.name,
+      purchaserName: purchaser.displayName,
+      memberCount: trip.members.length,
+      hdAccess: true
+    };
+  } catch (error) {
+    console.error('❌ Error handling direct payment success:', error);
+    throw error;
+  }
+};
+
+// New function to check HD access for a trip
+exports.checkHDAccess = async function (tripId) {
+  try {
+    const album = await prisma.album.findUnique({
+      where: { tripId },
+      select: { 
+        id: true, 
+        pdfHDUrl: true, 
+        hdAccess: true 
+      }
+    });
+
+    if (!album) {
+      return { hasHDAccess: false, message: 'Album not found' };
+    }
+
+    return {
+      hasHDAccess: album.hdAccess || false,
+      hdPdfUrl: album.pdfHDUrl,
+      albumId: album.id
+    };
+  } catch (error) {
+    console.error('❌ Error checking HD access:', error);
+    throw error;
+  }
+};
+
 exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, amount }) {
   try {
     console.log(`🔍 Creating payment intent for - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Amount: ${amount}`);
@@ -40,6 +159,12 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, 
       throw new Error('Album not found for this trip');
     }
 
+    // Check if HD access already exists
+    if (trip.album.hdAccess) {
+      console.log(`❌ HD access already available for trip: ${tripId}`);
+      throw new Error('HD album already available for this trip');
+    }
+
     const existingPayment = await prisma.payment.findFirst({
       where: {
         tripId,
@@ -63,7 +188,10 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amountInt,
       currency: CURRENCY,
-      automatic_payment_methods: { enabled: true },
+      automatic_payment_methods: { 
+        enabled: true,
+        allow_redirects: 'never' // Prevent redirects for better UX
+      },
       metadata: {
         userId,
         tripId,
@@ -74,7 +202,8 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, 
         tripName: trip.name
       },
       description: `Secret Trip HD Album - ${trip.name}`,
-      receipt_email: user.email
+      receipt_email: user.email,
+      setup_future_usage: 'off_session' // Allow future payments if needed
     });
 
     console.log(`✅ Stripe payment intent created: ${paymentIntent.id}`);
@@ -1043,7 +1172,7 @@ exports.processDirectPayment = async function ({ userId, tripId, albumId, amount
     }
 
     // Process payment success immediately
-    const result = await this.handleDirectPaymentSuccess(paymentIntent, amount);
+    const result = await this.handleDirectPaymentSuccess({ userId, tripId, albumId, paymentIntentId: paymentIntent.id, amount });
 
     return {
       success: true,
@@ -1056,72 +1185,6 @@ exports.processDirectPayment = async function ({ userId, tripId, albumId, amount
 
   } catch (error) {
     console.error('Error processing direct payment:', error);
-    throw error;
-  }
-};
-
-// Handle direct payment success (immediate processing)
-exports.handleDirectPaymentSuccess = async function (paymentIntent, amount) {
-  try {
-    const { userId, tripId, albumId } = paymentIntent.metadata;
-
-    // Create payment record
-    const payment = await prisma.payment.create({
-      data: {
-        userId,
-        tripId,
-        type: 'album_hd',
-        amount: amount,
-        currency: CURRENCY,
-        status: 'completed',
-        stripePaymentIntentId: paymentIntent.id
-      }
-    });
-
-    // Generate HD album immediately
-    const albumService = require('./album.service');
-    const hdPdfUrl = await albumService.generateHDVersion(albumId);
-
-    // Get trip details for notifications
-    const trip = await prisma.trip.findUnique({
-      where: { id: tripId },
-      include: { members: true, tripAliases: true }
-    });
-
-    const purchaser = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { displayName: true }
-    });
-
-    // Send notifications to all trip members
-    const notificationService = require('./notification.service');
-    const notificationPromises = trip.members.map(async (member) => {
-      const alias = trip.tripAliases.find(ta => ta.userId === member.id)?.alias || 'Agent';
-      try {
-        await notificationService.sendHDAlbumAvailableNotification({
-          userId: member.id,
-          tripName: trip.name,
-          alias,
-          purchaserName: purchaser.displayName,
-          albumId
-        });
-      } catch (notifError) {
-        console.error('Failed to send HD album notification:', notifError);
-      }
-    });
-
-    // Send notifications in parallel
-    await Promise.all(notificationPromises);
-
-    console.log(`✅ Direct HD album payment successful for trip ${trip.name}`);
-
-    return {
-      paymentId: payment.id,
-      hdPdfUrl,
-      success: true
-    };
-  } catch (error) {
-    console.error('Error handling direct payment success:', error);
     throw error;
   }
 };

@@ -1,10 +1,89 @@
 const paymentService =require('../services/payment.service')
 const { successResponse, errorResponse } = require('../utils/response');
 
+// Unified payment endpoint (handles payments only, no webhooks)
+exports.unifiedPayment = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { tripId, albumId, amount, paymentType = 'hd-album' } = req.body;
 
+    // Validation
+    if (!tripId || !albumId) {
+      return errorResponse(res, 400, 'Trip ID and Album ID are required');
+    }
 
+    if (!amount || amount < 100) { // Minimum 1 euro in cents
+      return errorResponse(res, 400, 'Valid amount is required (minimum €1.00)');
+    }
 
+    let paymentResult;
 
+    switch (paymentType) {
+      case 'hd-album':
+        paymentResult = await paymentService.createHDAlbumPaymentIntent({
+          userId,
+          tripId,
+          albumId,
+          amount
+        });
+        break;
+      
+      case 'direct':
+        paymentResult = await paymentService.processDirectPayment({
+          userId,
+          tripId,
+          albumId,
+          amount
+        });
+        break;
+      
+      default:
+        return errorResponse(res, 400, 'Invalid payment type. Must be "hd-album" or "direct"');
+    }
+
+    successResponse(res, 200, 'Payment intent created', paymentResult);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Handle payment success (called from frontend after successful payment)
+exports.handlePaymentSuccess = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { paymentIntentId, tripId, albumId, amount } = req.body;
+
+    if (!paymentIntentId || !tripId || !albumId) {
+      return errorResponse(res, 400, 'Payment intent ID, trip ID, and album ID are required');
+    }
+
+    const result = await paymentService.handleDirectPaymentSuccess({
+      userId,
+      tripId,
+      albumId,
+      paymentIntentId,
+      amount
+    });
+
+    successResponse(res, 200, 'Payment processed successfully', result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Check HD access for a trip
+exports.checkHDAccess = async (req, res, next) => {
+  try {
+    const { tripId } = req.params;
+    
+    const hdAccess = await paymentService.checkHDAccess(tripId);
+    successResponse(res, 200, 'HD access checked', hdAccess);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Legacy endpoints for backward compatibility
 exports.createHDAlbumPayment = async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -27,7 +106,7 @@ exports.createHDAlbumPayment = async (req, res, next) => {
   }
 };
 
-// Handle Stripe webhook
+// Handle Stripe webhook (legacy - kept for compatibility)
 exports.handleStripeWebhook = async (req, res, next) => {
   try {
     const signature = req.headers['stripe-signature'];
