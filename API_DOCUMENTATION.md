@@ -9,7 +9,7 @@ Authorization: Bearer <your_jwt_token>
 
 ## 💳 Payment Endpoints
 
-### 1. Create Payment Intent (Unified Endpoint)
+### 1. Unified Payment Endpoint (Create Intent + Handle Success)
 
 **Endpoint:** `POST /api/payments/unified`
 
@@ -18,6 +18,8 @@ Authorization: Bearer <your_jwt_token>
 Content-Type: application/json
 Authorization: Bearer <jwt_token>
 ```
+
+#### A. Create Payment Intent
 
 **Request Body:**
 ```json
@@ -46,6 +48,45 @@ Authorization: Bearer <jwt_token>
     "amount": 299,
     "currency": "eur",
     "paymentId": "9930ff2e-b27f-4d6e-8f73-b73da44d4ce2"
+  }
+}
+```
+
+#### B. Handle Payment Success
+
+**Request Body:**
+```json
+{
+  "tripId": "b5bbaa04-2724-4bb4-badc-ec7013d5c0cf",
+  "albumId": "930c8a4b-d546-4784-92d4-152dd99d6b22",
+  "amount": 299,
+  "paymentIntentId": "pi_3RoROMDlsTa0rvBq4bfbRIUb",
+  "isSuccess": true
+}
+```
+
+**Parameters:**
+- `tripId` (string, required): The trip ID
+- `albumId` (string, required): The album ID
+- `amount` (number, required): Amount in cents
+- `paymentIntentId` (string, required): Stripe payment intent ID
+- `isSuccess` (boolean, required): Set to `true` to handle payment success
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Payment processed successfully",
+  "data": {
+    "success": true,
+    "hdPdfUrl": "https://example.com/hd-album.pdf",
+    "message": "HD album unlocked for all trip members",
+    "paymentId": "9930ff2e-b27f-4d6e-8f73-b73da44d4ce2",
+    "paymentStatus": "completed",
+    "tripName": "Paris Adventure X2",
+    "purchaserName": "John Doe",
+    "memberCount": 5,
+    "hdAccess": true
   }
 }
 ```
@@ -269,7 +310,7 @@ Future<Map<String, dynamic>> createPaymentIntent({
 }
 ```
 
-### 2. Handle Payment Success
+### 2. Handle Payment Success (Unified Endpoint)
 
 ```dart
 Future<Map<String, dynamic>> handlePaymentSuccess({
@@ -279,16 +320,17 @@ Future<Map<String, dynamic>> handlePaymentSuccess({
   required int amount,
 }) async {
   final response = await http.post(
-    Uri.parse('$baseUrl/api/payments/success'),
+    Uri.parse('$baseUrl/api/payments/unified'),
     headers: {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
     },
     body: jsonEncode({
-      'paymentIntentId': paymentIntentId,
       'tripId': tripId,
       'albumId': albumId,
       'amount': amount,
+      'paymentIntentId': paymentIntentId,
+      'isSuccess': true,
     }),
   );
 
@@ -432,7 +474,7 @@ class PaymentService {
       );
 
       if (paymentResult.status == PaymentIntentsStatus.Succeeded) {
-        // 3. Handle payment success
+        // 3. Handle payment success using unified endpoint
         await handlePaymentSuccess(
           paymentIntentId: paymentResult.id!,
           tripId: tripId,
@@ -479,11 +521,10 @@ Use these test IDs for development:
 ## 📋 Summary
 
 **Key Endpoints for Flutter:**
-1. `POST /api/payments/unified` - Create payment intent
-2. `POST /api/payments/success` - Handle payment success
-3. `GET /api/payments/hd-access/{tripId}` - Check HD access
-4. `GET /api/payments/hd-availability/{tripId}` - Check availability
-5. `GET /api/payments/history` - Get payment history
+1. `POST /api/payments/unified` - Create payment intent OR handle payment success
+2. `GET /api/payments/hd-access/{tripId}` - Check HD access
+3. `GET /api/payments/hd-availability/{tripId}` - Check availability
+4. `GET /api/payments/history` - Get payment history
 
 **Required Headers:**
 - `Authorization: Bearer <jwt_token>`

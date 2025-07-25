@@ -1,11 +1,11 @@
 const paymentService =require('../services/payment.service')
 const { successResponse, errorResponse } = require('../utils/response');
 
-// Unified payment endpoint (handles payments only, no webhooks)
+// Unified payment endpoint (handles both payment intent creation and success processing)
 exports.unifiedPayment = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { tripId, albumId, amount, paymentType = 'hd-album' } = req.body;
+    const { tripId, albumId, amount, paymentType = 'hd-album', paymentIntentId, isSuccess = false } = req.body;
 
     // Validation
     if (!tripId || !albumId) {
@@ -18,6 +18,23 @@ exports.unifiedPayment = async (req, res, next) => {
 
     let paymentResult;
 
+    // If this is a success call (frontend has completed payment with Stripe)
+    if (isSuccess && paymentIntentId) {
+      console.log(`🎉 Processing payment success in unified endpoint - PaymentIntent: ${paymentIntentId}`);
+      
+      paymentResult = await paymentService.handleDirectPaymentSuccess({
+        userId,
+        tripId,
+        albumId,
+        paymentIntentId,
+        amount
+      });
+
+      successResponse(res, 200, 'Payment processed successfully', paymentResult);
+      return;
+    }
+
+    // Otherwise, create payment intent
     switch (paymentType) {
       case 'hd-album':
         paymentResult = await paymentService.createHDAlbumPaymentIntent({
