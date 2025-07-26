@@ -32,4 +32,7 @@ router.get('/:paymentId/status', paymentController.getPaymentStatus);
 // Get user payment history
 router.get('/history', paymentController.getUserPaymentHistory);
 
+// Flutter integration guide (no auth required for documentation)
+router.get('/flutter-guide', paymentController.getFlutterIntegrationGuide);
+
 module.exports = router;

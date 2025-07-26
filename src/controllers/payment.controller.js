@@ -2,10 +2,20 @@ const paymentService =require('../services/payment.service')
 const { successResponse, errorResponse } = require('../utils/response');
 
 // Unified payment endpoint (handles both payment intent creation and success processing)
+// Supports both React (web) and Flutter (mobile) clients
 exports.unifiedPayment = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { tripId, albumId, amount, paymentType = 'hd-album', paymentIntentId, isSuccess = false } = req.body;
+    const { 
+      tripId, 
+      albumId, 
+      amount, 
+      paymentType = 'hd-album', 
+      paymentIntentId, 
+      isSuccess = false,
+      platform = 'web', // 'web' for React, 'mobile' for Flutter
+      paymentMethodData = null // For Flutter: card details if needed
+    } = req.body;
 
     // Validation
     if (!tripId || !albumId) {
@@ -20,7 +30,7 @@ exports.unifiedPayment = async (req, res, next) => {
 
     // If this is a success call (frontend has completed payment with Stripe)
     if (isSuccess && paymentIntentId) {
-      console.log(`🎉 Processing payment success in unified endpoint - PaymentIntent: ${paymentIntentId}`);
+      console.log(`🎉 Processing payment success in unified endpoint - PaymentIntent: ${paymentIntentId}, Platform: ${platform}`);
       
       paymentResult = await paymentService.handleDirectPaymentSuccess({
         userId,
@@ -34,31 +44,68 @@ exports.unifiedPayment = async (req, res, next) => {
       return;
     }
 
-    // Otherwise, create payment intent
+    // Create payment intent based on platform and payment type
     switch (paymentType) {
       case 'hd-album':
-        paymentResult = await paymentService.createHDAlbumPaymentIntent({
-          userId,
-          tripId,
-          albumId,
-          amount
-        });
+        if (platform === 'mobile') {
+          // For Flutter: Create intent and return client secret for Stripe SDK
+          paymentResult = await paymentService.createHDAlbumPaymentIntentForMobile({
+            userId,
+            tripId,
+            albumId,
+            amount
+          });
+        } else {
+          // For React: Standard web flow
+          paymentResult = await paymentService.createHDAlbumPaymentIntent({
+            userId,
+            tripId,
+            albumId,
+            amount
+          });
+        }
         break;
       
       case 'direct':
-        paymentResult = await paymentService.processDirectPayment({
-          userId,
-          tripId,
-          albumId,
-          amount
-        });
+        if (platform === 'mobile' && paymentMethodData) {
+          // For Flutter: Process direct payment with card data
+          paymentResult = await paymentService.processDirectPaymentForMobile({
+            userId,
+            tripId,
+            albumId,
+            amount,
+            paymentMethodData
+          });
+        } else {
+          // For React: Standard direct payment
+          paymentResult = await paymentService.processDirectPayment({
+            userId,
+            tripId,
+            albumId,
+            amount
+          });
+        }
         break;
       
       default:
         return errorResponse(res, 400, 'Invalid payment type. Must be "hd-album" or "direct"');
     }
 
-    successResponse(res, 200, 'Payment intent created', paymentResult);
+    // Add platform-specific response data
+    const responseData = {
+      ...paymentResult,
+      platform,
+      paymentType,
+      instructions: platform === 'mobile' ? {
+        nextStep: 'Use client_secret with Stripe SDK to confirm payment',
+        sdkMethod: 'Stripe.instance.confirmPayment(clientSecret, paymentMethodParams)'
+      } : {
+        nextStep: 'Use paymentIntentId with Stripe Elements to confirm payment',
+        sdkMethod: 'stripe.confirmPayment({elements, confirmParams})'
+      }
+    };
+
+    successResponse(res, 200, 'Payment intent created', responseData);
   } catch (err) {
     next(err);
   }
@@ -371,3 +418,168 @@ function isValidDate(dateString) {
   const date = new Date(dateString);
   return date instanceof Date && !isNaN(date);
 }
+
+// Flutter SDK integration guide endpoint
+exports.getFlutterIntegrationGuide = async (req, res, next) => {
+  try {
+    const guide = {
+      title: 'Flutter Stripe Integration Guide',
+      version: '1.0.0',
+      platform: 'mobile',
+      endpoints: {
+        createPaymentIntent: {
+          url: 'POST /api/payments/unified',
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer {token}',
+            'Content-Type': 'application/json'
+          },
+          body: {
+            tripId: 'string (required)',
+            albumId: 'string (required)',
+            amount: 'number (required, in cents)',
+            paymentType: 'hd-album',
+            platform: 'mobile'
+          },
+          response: {
+            success: true,
+            data: {
+              paymentIntentId: 'pi_1234567890',
+              clientSecret: 'pi_1234567890_secret_abc123',
+              amount: 299,
+              currency: 'eur',
+              paymentId: 'uuid',
+              platform: 'mobile',
+              sdkInstructions: {
+                method: 'Stripe.instance.confirmPayment',
+                params: 'clientSecret, PaymentMethodParams.card(paymentMethodData)'
+              }
+            }
+          }
+        },
+        confirmPayment: {
+          url: 'POST /api/payments/unified',
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer {token}',
+            'Content-Type': 'application/json'
+          },
+          body: {
+            tripId: 'string (required)',
+            albumId: 'string (required)',
+            amount: 'number (required)',
+            paymentIntentId: 'string (required)',
+            isSuccess: true
+          }
+        }
+      },
+      flutterCode: {
+        dependencies: `
+dependencies:
+  flutter_stripe: ^10.0.0
+  http: ^1.1.0
+        `,
+        setup: `
+// main.dart
+import 'package:flutter_stripe/flutter_stripe.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  Stripe.publishableKey = 'pk_test_your_publishable_key';
+  runApp(MyApp());
+}
+        `,
+        paymentFlow: `
+// 1. Create payment intent
+final response = await http.post(
+  Uri.parse('${process.env.BACKEND_URL}/api/payments/unified'),
+  headers: {
+    'Authorization': 'Bearer $token',
+    'Content-Type': 'application/json',
+  },
+  body: jsonEncode({
+    'tripId': tripId,
+    'albumId': albumId,
+    'amount': amount,
+    'paymentType': 'hd-album',
+    'platform': 'mobile'
+  }),
+);
+
+final paymentData = jsonDecode(response.body)['data'];
+final clientSecret = paymentData['clientSecret'];
+
+// 2. Confirm payment with Stripe SDK
+try {
+  await Stripe.instance.confirmPayment(
+    clientSecret,
+    PaymentMethodParams.card(
+      paymentMethodData: PaymentMethodData(
+        billingDetails: billingDetails,
+      ),
+    ),
+  );
+  
+  // 3. Notify backend of success
+  await http.post(
+    Uri.parse('${process.env.BACKEND_URL}/api/payments/unified'),
+    headers: {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    },
+    body: jsonEncode({
+      'tripId': tripId,
+      'albumId': albumId,
+      'amount': amount,
+      'paymentIntentId': paymentData['paymentIntentId'],
+      'isSuccess': true
+    }),
+  );
+  
+  print('Payment successful!');
+} catch (e) {
+  print('Payment failed: $e');
+}
+        `,
+        errorHandling: `
+// Error handling
+try {
+  // Payment flow code here
+} catch (e) {
+  if (e is StripeException) {
+    switch (e.error.code) {
+      case 'card_declined':
+        // Handle card declined
+        break;
+      case 'insufficient_funds':
+        // Handle insufficient funds
+        break;
+      default:
+        // Handle other errors
+        break;
+    }
+  }
+}
+        `
+      },
+      bestPractices: [
+        'Always create payment intent on backend (not client-side)',
+        'Use client_secret with Stripe SDK for payment confirmation',
+        'Notify backend after successful payment',
+        'Handle payment errors gracefully',
+        'Store payment records in backend database',
+        'Use proper error handling for network requests'
+      ],
+      securityNotes: [
+        'Never expose Stripe secret key in Flutter app',
+        'Always validate payment on backend',
+        'Use HTTPS for all API calls',
+        'Implement proper authentication'
+      ]
+    };
+
+    successResponse(res, 200, 'Flutter integration guide retrieved', guide);
+  } catch (err) {
+    next(err);
+  }
+};

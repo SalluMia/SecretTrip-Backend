@@ -235,6 +235,137 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, 
   }
 };
 
+// Flutter-specific payment intent creation
+exports.createHDAlbumPaymentIntentForMobile = async function ({ userId, tripId, albumId, amount }) {
+  try {
+    console.log(`📱 Creating mobile payment intent for - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Amount: ${amount}`);
+    
+    // Convert amount to integer and validate
+    const amountInt = parseInt(amount);
+    if (!amountInt || amountInt <= 0) {
+      throw new Error('Valid amount is required');
+    }
+    
+    console.log(`💰 Amount converted to integer: ${amountInt} cents`);
+
+    const trip = await prisma.trip.findFirst({
+      where: {
+        id: tripId,
+        members: { some: { id: userId } }
+      },
+      include: {
+        album: true,
+        members: true
+      }
+    });
+
+    if (!trip) {
+      console.log(`❌ Trip not found or user not a member - Trip: ${tripId}, User: ${userId}`);
+      throw new Error('Trip not found or access denied');
+    }
+    
+    console.log(`✅ Trip found: ${trip.name}, User is a member`);
+
+    if (!trip.album || trip.album.id !== albumId) {
+      console.log(`❌ Album not found for trip - Expected: ${albumId}, Found: ${trip.album?.id}`);
+      throw new Error('Album not found for this trip');
+    }
+
+    // Check if HD access already exists
+    if (trip.album.hdAccess) {
+      console.log(`❌ HD access already available for trip: ${tripId}`);
+      throw new Error('HD album already available for this trip');
+    }
+
+    const existingPayment = await prisma.payment.findFirst({
+      where: {
+        tripId,
+        type: 'album_hd',
+        status: 'completed'
+      }
+    });
+
+    if (existingPayment) {
+      console.log(`❌ HD album already purchased for trip: ${tripId}`);
+      throw new Error('HD album already purchased for this trip');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, displayName: true }
+    });
+
+    console.log(`💳 Creating Stripe payment intent for mobile - Amount: ${amountInt} cents (€${(amountInt/100).toFixed(2)})`);
+
+    // For mobile, we create a payment intent that can be confirmed with Stripe SDK
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amountInt,
+      currency: CURRENCY,
+      automatic_payment_methods: { 
+        enabled: true,
+        allow_redirects: 'never' // Prevent redirects for mobile
+      },
+      metadata: {
+        userId,
+        tripId,
+        albumId,
+        type: 'album_hd',
+        platform: 'mobile',
+        userEmail: user.email,
+        userName: user.displayName,
+        tripName: trip.name
+      },
+      description: `Secret Trip HD Album (Mobile) - ${trip.name}`,
+      receipt_email: user.email,
+      setup_future_usage: 'off_session'
+    });
+
+    console.log(`✅ Mobile Stripe payment intent created: ${paymentIntent.id}`);
+
+    const payment = await prisma.payment.create({
+      data: {
+        userId,
+        tripId,
+        type: 'album_hd',
+        amount: amountInt,
+        currency: CURRENCY,
+        status: 'pending',
+        stripePaymentIntentId: paymentIntent.id
+      }
+    });
+
+    console.log(`✅ Mobile payment record created: ${payment.id}`);
+
+    // Return mobile-specific response with client secret for Flutter SDK
+    return {
+      paymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      amount: amountInt,
+      currency: CURRENCY,
+      paymentId: payment.id,
+      platform: 'mobile',
+      sdkInstructions: {
+        method: 'Stripe.instance.confirmPayment',
+        params: 'clientSecret, PaymentMethodParams.card(paymentMethodData)',
+        example: `
+// Flutter example:
+await Stripe.instance.confirmPayment(
+  clientSecret,
+  PaymentMethodParams.card(
+    paymentMethodData: PaymentMethodData(
+      billingDetails: billingDetails,
+    ),
+  ),
+);
+        `
+      }
+    };
+  } catch (error) {
+    console.error('❌ Error creating mobile payment intent:', error);
+    throw error;
+  }
+};
+
 exports.handlePaymentSuccess = async function (paymentIntentId) {
   try {
     console.log(`🔄 Processing webhook payment success for intent: ${paymentIntentId}`);
@@ -1185,6 +1316,116 @@ exports.processDirectPayment = async function ({ userId, tripId, albumId, amount
 
   } catch (error) {
     console.error('Error processing direct payment:', error);
+    throw error;
+  }
+};
+
+// Flutter-specific direct payment processing
+exports.processDirectPaymentForMobile = async function ({ userId, tripId, albumId, amount, paymentMethodData }) {
+  try {
+    console.log(`📱 Processing mobile direct payment - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Amount: ${amount}`);
+    
+    // Validate trip and album access
+    const trip = await prisma.trip.findFirst({
+      where: {
+        id: tripId,
+        members: { some: { id: userId } }
+      },
+      include: {
+        album: true,
+        members: true
+      }
+    });
+
+    if (!trip) throw new Error('Trip not found or access denied');
+    if (!trip.album || trip.album.id !== albumId) throw new Error('Album not found for this trip');
+
+    // Check if HD album already purchased
+    const existingPayment = await prisma.payment.findFirst({
+      where: {
+        tripId,
+        type: 'album_hd',
+        status: 'completed'
+      }
+    });
+
+    if (existingPayment) throw new Error('HD album already purchased for this trip');
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, displayName: true }
+    });
+
+    console.log(`💳 Creating mobile direct payment intent - Amount: ${amount} cents`);
+
+    // For mobile, create payment intent without immediate confirmation
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amount,
+      currency: CURRENCY,
+      automatic_payment_methods: { 
+        enabled: true,
+        allow_redirects: 'never' // Prevent redirects for mobile
+      },
+      metadata: {
+        userId,
+        tripId,
+        albumId,
+        type: 'album_hd',
+        platform: 'mobile',
+        userEmail: user.email,
+        userName: user.displayName,
+        tripName: trip.name
+      },
+      description: `Secret Trip HD Album (Mobile Direct) - ${trip.name}`,
+      receipt_email: user.email,
+      setup_future_usage: 'off_session'
+    });
+
+    console.log(`✅ Mobile direct payment intent created: ${paymentIntent.id}`);
+
+    const payment = await prisma.payment.create({
+      data: {
+        userId,
+        tripId,
+        type: 'album_hd',
+        amount: amount,
+        currency: CURRENCY,
+        status: 'pending',
+        stripePaymentIntentId: paymentIntent.id
+      }
+    });
+
+    console.log(`✅ Mobile direct payment record created: ${payment.id}`);
+
+    // Return mobile-specific response with client secret for Flutter SDK
+    return {
+      paymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      amount: amount,
+      currency: CURRENCY,
+      paymentId: payment.id,
+      platform: 'mobile',
+      paymentType: 'direct',
+      sdkInstructions: {
+        method: 'Stripe.instance.confirmPayment',
+        params: 'clientSecret, PaymentMethodParams.card(paymentMethodData)',
+        example: `
+// Flutter direct payment example:
+await Stripe.instance.confirmPayment(
+  clientSecret,
+  PaymentMethodParams.card(
+    paymentMethodData: PaymentMethodData(
+      billingDetails: billingDetails,
+    ),
+  ),
+);
+        `,
+        note: 'After successful payment, call /api/payments/unified with isSuccess=true and paymentIntentId'
+      }
+    };
+
+  } catch (error) {
+    console.error('❌ Error processing mobile direct payment:', error);
     throw error;
   }
 };
