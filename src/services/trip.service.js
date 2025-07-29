@@ -1026,22 +1026,25 @@ exports.deleteTrip = async ({ tripId, userId }) => {
     throw new Error('Only trip creator can delete the trip');
   }
 
-  // Step 3: Check if trip can be deleted (business logic)
-  if (trip.status === 'ACTIVE') {
-    throw new Error('Active trips cannot be deleted. Please complete or end the trip first');
+  // Step 3: Check member count and trip status
+  const memberCount = trip.members.length;
+  const isSingleUser = memberCount === 1;
+  const isOnlyCreator = isSingleUser && trip.members[0].id === userId;
+
+  console.log(`🔍 Trip deletion check - Members: ${memberCount}, Status: ${trip.status}, IsCreator: ${isOnlyCreator}`);
+
+  // Step 4: Business logic for deletion
+  if (!isOnlyCreator) {
+    throw new Error('Trip has multiple members. Cannot delete trip with other members');
   }
 
-  if (trip.status === 'COMPLETED') {
-    throw new Error('Completed trips cannot be deleted as they contain historical data');
-  }
-
-  // Only UPCOMING trips can be deleted
-  if (trip.status !== 'UPCOMING') {
-    throw new Error(`Trip with status "${trip.status}" cannot be deleted`);
+  // Only allow deletion for ACTIVE trips when single user
+  if (trip.status !== 'ACTIVE') {
+    throw new Error('Only active trips can be deleted by single user');
   }
 
   // Step 4: Delete related data first (to avoid foreign key constraints)
-  console.log(`🗑️ Deleting trip "${trip.name}" and all related data...`);
+  console.log(`🗑️ Deleting trip "${trip.name}" (Single user, Active status) and all related data...`);
 
   // Delete in this order to handle foreign key relationships
   const deletionResults = await prisma.$transaction(async (tx) => {
@@ -1101,6 +1104,7 @@ exports.deleteTrip = async ({ tripId, userId }) => {
     tripName: trip.name,
     deletedAt: new Date().toISOString(),
     membersNotified: trip.members.length - 1, // Exclude creator
+    deletionReason: 'Single user active trip deletion',
     deletionSummary: {
       missionsDeleted: deletionResults.missions,
       aliasesDeleted: deletionResults.aliases,

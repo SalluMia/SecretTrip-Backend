@@ -445,7 +445,8 @@ exports.deleteTrip = async (req, res, next) => {
       deletedTripId: tripId,
       tripName: data.tripName,
       deletedAt: new Date().toISOString(),
-      membersNotified: data.membersNotified || 0
+      membersNotified: data.membersNotified || 0,
+      deletionReason: data.deletionReason
     });
   } catch (err) {
     // Handle specific delete errors
@@ -455,6 +456,14 @@ exports.deleteTrip = async (req, res, next) => {
     
     if (err.message === 'Only trip creator can delete the trip') {
       return errorResponse(res, 403, 'Access denied. Only the trip creator can delete this trip');
+    }
+    
+    if (err.message === 'Trip has multiple members. Cannot delete trip with other members') {
+      return errorResponse(res, 400, 'Cannot delete trip with other members. Please ask other members to leave first.');
+    }
+    
+    if (err.message === 'Only active trips can be deleted by single user') {
+      return errorResponse(res, 400, 'Only active trips can be deleted when you are the only member.');
     }
     
     if (err.message.includes('cannot be deleted')) {
