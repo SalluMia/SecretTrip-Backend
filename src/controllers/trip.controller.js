@@ -462,8 +462,8 @@ exports.deleteTrip = async (req, res, next) => {
       return errorResponse(res, 400, 'Cannot delete trip with other members. Please ask other members to leave first.');
     }
     
-    if (err.message === 'Only active trips can be deleted by single user') {
-      return errorResponse(res, 400, 'Only active trips can be deleted when you are the only member.');
+    if (err.message === 'Only active or upcoming trips can be deleted by single user') {
+      return errorResponse(res, 400, 'Only active or upcoming trips can be deleted when you are the only member.');
     }
     
     if (err.message.includes('cannot be deleted')) {

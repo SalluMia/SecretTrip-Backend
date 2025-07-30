@@ -1022,6 +1022,7 @@ exports.deleteTrip = async ({ tripId, userId }) => {
     throw new Error('Trip not found');
   }
 
+  // ✅ UPDATED: Only trip creator can delete the trip
   if (trip.creatorId !== userId) {
     throw new Error('Only trip creator can delete the trip');
   }
@@ -1034,17 +1035,18 @@ exports.deleteTrip = async ({ tripId, userId }) => {
   console.log(`🔍 Trip deletion check - Members: ${memberCount}, Status: ${trip.status}, IsCreator: ${isOnlyCreator}`);
 
   // Step 4: Business logic for deletion
+  // ✅ UPDATED: Allow deletion for both ACTIVE and UPCOMING trips
   if (!isOnlyCreator) {
     throw new Error('Trip has multiple members. Cannot delete trip with other members');
   }
 
-  // Only allow deletion for ACTIVE trips when single user
-  if (trip.status !== 'ACTIVE') {
-    throw new Error('Only active trips can be deleted by single user');
+  // ✅ UPDATED: Allow deletion for both ACTIVE and UPCOMING trips when single user
+  if (trip.status !== 'ACTIVE' && trip.status !== 'UPCOMING') {
+    throw new Error('Only active or upcoming trips can be deleted by single user');
   }
 
-  // Step 4: Delete related data first (to avoid foreign key constraints)
-  console.log(`🗑️ Deleting trip "${trip.name}" (Single user, Active status) and all related data...`);
+  // Step 5: Delete related data first (to avoid foreign key constraints)
+  console.log(`🗑️ Deleting trip "${trip.name}" (Status: ${trip.status}, Single user) and all related data...`);
 
   // Delete in this order to handle foreign key relationships
   const deletionResults = await prisma.$transaction(async (tx) => {
@@ -1098,13 +1100,14 @@ exports.deleteTrip = async ({ tripId, userId }) => {
     members: trip.members.length
   });
 
-  // Step 5: Return success data
+  // Step 6: Return success data
   return {
     tripId,
     tripName: trip.name,
+    tripStatus: trip.status,
     deletedAt: new Date().toISOString(),
     membersNotified: trip.members.length - 1, // Exclude creator
-    deletionReason: 'Single user active trip deletion',
+    deletionReason: `Single user ${trip.status.toLowerCase()} trip deletion`,
     deletionSummary: {
       missionsDeleted: deletionResults.missions,
       aliasesDeleted: deletionResults.aliases,
