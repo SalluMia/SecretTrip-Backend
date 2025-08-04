@@ -64,13 +64,24 @@ class MissionSchedulerService {
         const tripStartDate = new Date(trip.startDate);
         const tripStartDay = new Date(tripStartDate.getFullYear(), tripStartDate.getMonth(), tripStartDate.getDate());
         
-        console.log(`🚀 Trip "${trip.name}": Start date is ${tripStartDay.toISOString()}, Today is ${today.toISOString()}`);
+        // ✅ NEW: Add 1-hour buffer logic
+        const oneHourAfterStart = new Date(tripStartDate);
+        oneHourAfterStart.setHours(oneHourAfterStart.getHours() + 1);
         
-        // Only activate if the trip start date is today or has passed
-        if (tripStartDay <= today) {
+        console.log(`🚀 Trip "${trip.name}": Start date is ${tripStartDay.toISOString()}, Today is ${today.toISOString()}`);
+        console.log(`⏰ Trip start time: ${tripStartDate.toLocaleString()}`);
+        console.log(`⏰ 1 hour after start: ${oneHourAfterStart.toLocaleString()}`);
+        console.log(`⏰ Current time: ${now.toLocaleString()}`);
+        
+        // ✅ NEW: Only activate if the trip start date is today AND 1 hour has passed since start time
+        if (tripStartDay <= today && now >= oneHourAfterStart) {
+          console.log(`✅ Trip "${trip.name}" ready to activate (1 hour buffer passed)`);
           await this.activateTripAndAssignMissions(trip);
+        } else if (tripStartDay <= today) {
+          const timeRemaining = Math.ceil((oneHourAfterStart - now) / (1000 * 60)); // minutes
+          console.log(`⏳ Trip "${trip.name}" not ready to activate yet. ${timeRemaining} minutes remaining in buffer.`);
         } else {
-          console.log(`⏳ Trip "${trip.name}" not ready to activate yet`);
+          console.log(`⏳ Trip "${trip.name}" not ready to activate yet (future date)`);
         }
       }
     } catch (error) {
@@ -426,6 +437,64 @@ class MissionSchedulerService {
       console.log('✅ Manual trip check completed');
     } catch (error) {
       console.error('Error in manual trip check:', error);
+    }
+  }
+
+  // ✅ NEW: Immediate mission assignment for newly created active trips
+  async assignMissionsToActiveTrip(trip) {
+    try {
+      console.log(`🚀 Assigning missions immediately to active trip: ${trip.name} (ID: ${trip.id})`);
+
+      // Get trip with members and aliases for proper mission distribution
+      const tripWithMembers = await prisma.trip.findUnique({
+        where: { id: trip.id },
+        include: {
+          members: true,
+          tripAliases: true
+        }
+      });
+
+      if (!tripWithMembers) {
+        throw new Error(`Trip ${trip.id} not found`);
+      }
+
+      // Calculate mission distribution according to DEV FILE algorithm
+      const missionDistribution = this.calculateMissionDistribution(tripWithMembers);
+      
+      console.log(`📊 Mission distribution for "${trip.name}":`, {
+        participants: missionDistribution.participantCount,
+        duration: missionDistribution.durationDays,
+        targetPhotos: missionDistribution.targetPhotos,
+        missionsPerUser: missionDistribution.missionsPerUser,
+        missionsPerUserPerDay: missionDistribution.missionsPerUserPerDay,
+        totalMissions: missionDistribution.totalMissions
+      });
+      
+      // Get mission templates based on trip theme
+      const missionTemplates = await this.getMissionTemplates(trip.theme, trip.tripMode);
+      console.log(`🎯 Found ${missionTemplates.length} mission templates for theme: ${trip.theme}, mode: ${trip.tripMode}`);
+      
+      // Assign first day missions to all members
+      await this.assignInitialMissions(tripWithMembers, missionTemplates, missionDistribution);
+      
+      // Update trip total missions count
+      await prisma.trip.update({
+        where: { id: trip.id },
+        data: { 
+          totalMissions: missionDistribution.totalMissions
+        }
+      });
+
+      // Send activation notifications
+      await notificationService.sendTripActivationNotification({
+        tripId: trip.id,
+        tripName: trip.name
+      });
+
+      console.log(`✅ Missions assigned immediately for trip "${trip.name}" with ${missionDistribution.totalMissions} total missions planned`);
+    } catch (error) {
+      console.error(`❌ Error assigning missions to active trip ${trip.id}:`, error);
+      throw error; // Re-throw to handle in calling function
     }
   }
 }

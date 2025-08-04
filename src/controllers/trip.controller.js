@@ -52,7 +52,9 @@ exports.createTrip = async (req, res, next) => {
     // ✅ Enhanced response with status information
     const responseMessage = data.isActive 
       ? 'Trip created and activated! Your adventure begins now 🚀'
-      : 'Trip created successfully! Get ready for your upcoming adventure 📅';
+      : data.status === 'UPCOMING' && data.message.includes('1 hour')
+        ? 'Trip created successfully! It will become active in 1 hour to allow time for inviting friends ⏰'
+        : 'Trip created successfully! Get ready for your upcoming adventure 📅';
     
     const responseData = {
       tripId: data.tripId,
@@ -66,6 +68,8 @@ exports.createTrip = async (req, res, next) => {
     console.log(`✅ Trip "${name}" created with status: ${data.status}`);
     if (data.isActive) {
       console.log('🎯 Trip is active - missions have been assigned');
+    } else if (data.status === 'UPCOMING' && data.message.includes('1 hour')) {
+      console.log('⏳ Trip will become active in 1 hour - allowing time for invites');
     }
     
     successResponse(res, 201, responseMessage, responseData);

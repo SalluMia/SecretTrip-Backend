@@ -4,6 +4,7 @@
 const { prisma } = require('../config/prisma');
 const { generateCode } = require('../utils/generateCode');
 const { shuffleArray, tripDurationDays } = require('../utils/helpers');
+const missionSchedulerService = require('./missionScheduler.service');
 
 exports.createTrip = async ({ userId, name, theme, location, startDate, endDate, alias, tripMode = 'normal', description }) => {
   const code = generateCode(6);
@@ -13,7 +14,7 @@ exports.createTrip = async ({ userId, name, theme, location, startDate, endDate,
   // ✅ FIXED: Pass the trip name parameter to the validation function
   await validateTripDateConflicts(userId, parsedStartDate, parsedEndDate, name);
   
-  // ✅ NEW: Determine trip status based on start date
+  // ✅ NEW: Determine trip status based on start date with 1-hour buffer
   const today = new Date();
   today.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
   
@@ -23,18 +24,29 @@ exports.createTrip = async ({ userId, name, theme, location, startDate, endDate,
   const endDateOnly = new Date(parsedEndDate);
   endDateOnly.setHours(0, 0, 0, 0);
   
+  // ✅ NEW: Add 1-hour buffer for today's trips
+  const oneHourFromNow = new Date();
+  oneHourFromNow.setHours(oneHourFromNow.getHours() + 1);
+  
   let tripStatus = 'UPCOMING';
   
   // Check if trip should be active or completed based on dates
   if (startDateOnly <= today && endDateOnly >= today) {
-    tripStatus = 'ACTIVE';
+    // ✅ NEW: For trips created today, always start as UPCOMING to allow 1-hour buffer
+    tripStatus = 'UPCOMING'; // Keep as upcoming for 1 hour to allow invites
   } else if (endDateOnly < today) {
     throw new Error('Cannot create a trip with end date in the past');
   }
   
   console.log(`🗓️ Trip "${name}" dates: ${startDateOnly.toDateString()} to ${endDateOnly.toDateString()}`);
   console.log(`📅 Today: ${today.toDateString()}`);
+  console.log(`⏰ Start time: ${parsedStartDate.toLocaleString()}`);
+  console.log(`⏰ 1 hour from now: ${oneHourFromNow.toLocaleString()}`);
   console.log(`🎯 Trip status will be: ${tripStatus}`);
+  
+  if (startDateOnly <= today && tripStatus === 'UPCOMING') {
+    console.log(`⏳ Trip "${name}" starts today but will become active in 1 hour to allow invites`);
+  }
   
   const trip = await prisma.trip.create({
     data: {
@@ -57,41 +69,9 @@ exports.createTrip = async ({ userId, name, theme, location, startDate, endDate,
     data: { userId, tripId: trip.id, alias }
   });
 
-  // ✅ NEW: If trip is active, automatically assign missions
-  if (tripStatus === 'ACTIVE') {
-    console.log(`🚀 Trip "${name}" is starting today, auto-assigning missions...`);
-    
-    try {
-      const days = tripDurationDays(trip.startDate, trip.endDate);
-      const N = 1; // Only creator initially
-      const target = (N * days < 40) ? 100 : 80;
-      const M = Math.ceil(target / N);
-
-      const allTemplates = await prisma.missionTemplate.findMany({
-        where: { category: trip.theme }
-      });
-
-      if (allTemplates.length > 0) {
-        const selected = shuffleArray(allTemplates).slice(0, M);
-        for (const tmpl of selected) {
-          await prisma.assignedMission.create({
-            data: {
-              tripId: trip.id,
-              userId: userId,
-              title: tmpl.title,
-              instruction: tmpl.instruction,
-              category: tmpl.category,
-              sampleImageUrl: tmpl.sampleImageUrl,
-              missionTemplateId: tmpl.id
-            }
-          });
-        }
-        console.log(`✅ Assigned ${selected.length} missions to trip creator`);
-      }
-    } catch (missionError) {
-      console.error('Failed to assign missions during trip creation:', missionError);
-      // Don't fail trip creation if mission assignment fails
-    }
+  // ✅ NEW: Trips created today will become active after 1 hour via cron job
+  if (startDateOnly <= today) {
+    console.log(`⏳ Trip "${name}" created with UPCOMING status. Will become active in 1 hour to allow invites.`);
   }
 
   return { 
@@ -100,8 +80,10 @@ exports.createTrip = async ({ userId, name, theme, location, startDate, endDate,
     status: tripStatus,
     isActive: tripStatus === 'ACTIVE',
     message: tripStatus === 'ACTIVE' 
-      ? `Trip "${name}" created and activated! Missions have been assigned.`
-      : `Trip "${name}" created successfully and scheduled to start on ${startDateOnly.toDateString()}.`
+      ? `Trip "${name}" created and activated! Missions have been assigned immediately.`
+      : startDateOnly <= today 
+        ? `Trip "${name}" created successfully! It will become active in 1 hour to allow time for inviting friends.`
+        : `Trip "${name}" created successfully and scheduled to start on ${startDateOnly.toDateString()}.`
   };
 };
 // Enhanced trip preview with detailed information
