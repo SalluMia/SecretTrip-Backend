@@ -64,29 +64,33 @@ class MissionSchedulerService {
       for (const trip of tripsToActivate) {
         const tripStartDate = new Date(trip.startDate);
         const tripStartDay = new Date(tripStartDate.getFullYear(), tripStartDate.getMonth(), tripStartDate.getDate());
+        const tripCreatedAt = new Date(trip.createdAt);
+        const tripCreatedDay = new Date(tripCreatedAt.getFullYear(), tripCreatedAt.getMonth(), tripCreatedAt.getDate());
         
-        // ✅ NEW: Add 1-hour buffer logic
-        const oneHourAfterStart = new Date(tripStartDate);
-        oneHourAfterStart.setHours(oneHourAfterStart.getHours() + 1);
+        // ✅ FIXED: Add 1-hour buffer logic based on creation time, not start time
+        const oneHourAfterCreation = new Date(tripCreatedAt);
+        oneHourAfterCreation.setHours(oneHourAfterCreation.getHours() + 1);
         
-        // ✅ LOGIC: For trips created today, apply 1-hour buffer. For future trips, activate immediately on start date
-        const isTodayTrip = tripStartDay.getTime() === today.getTime();
+        // ✅ LOGIC: For trips created today, apply 1-hour buffer from creation time
+        const isCreatedToday = tripCreatedDay.getTime() === today.getTime();
+        const isStartDateToday = tripStartDay.getTime() === today.getTime();
         
         console.log(`🚀 Trip "${trip.name}": Start date is ${tripStartDay.toISOString()}, Today is ${today.toISOString()}`);
+        console.log(`⏰ Trip created at: ${tripCreatedAt.toLocaleString()}`);
         console.log(`⏰ Trip start time: ${tripStartDate.toLocaleString()}`);
-        console.log(`⏰ 1 hour after start: ${oneHourAfterStart.toLocaleString()}`);
+        console.log(`⏰ 1 hour after creation: ${oneHourAfterCreation.toLocaleString()}`);
         console.log(`⏰ Current time: ${now.toLocaleString()}`);
-        console.log(`📅 Is today's trip: ${isTodayTrip ? 'Yes' : 'No'}`);
+        console.log(`📅 Created today: ${isCreatedToday ? 'Yes' : 'No'}, Start date today: ${isStartDateToday ? 'Yes' : 'No'}`);
         
-        if (isTodayTrip && now >= oneHourAfterStart) {
-          console.log(`✅ Trip "${trip.name}" ready to activate (1 hour buffer passed for today's trip)`);
+        if (isCreatedToday && now >= oneHourAfterCreation) {
+          console.log(`✅ Trip "${trip.name}" ready to activate (1 hour buffer passed since creation)`);
           await this.activateTripAndAssignMissions(trip);
-        } else if (isTodayTrip) {
-          const timeRemaining = Math.ceil((oneHourAfterStart - now) / (1000 * 60)); // minutes
+        } else if (isCreatedToday) {
+          const timeRemaining = Math.ceil((oneHourAfterCreation - now) / (1000 * 60)); // minutes
           console.log(`⏳ Trip "${trip.name}" not ready to activate yet. ${timeRemaining} minutes remaining in buffer.`);
         } else if (tripStartDay <= today) {
-          // Future trip that has reached its start date (no buffer needed)
-          console.log(`✅ Trip "${trip.name}" ready to activate (future trip reached start date)`);
+          // Trip created earlier but start date is today or past (no buffer needed)
+          console.log(`✅ Trip "${trip.name}" ready to activate (trip created earlier, start date reached)`);
           await this.activateTripAndAssignMissions(trip);
         } else {
           console.log(`⏳ Trip "${trip.name}" not ready to activate yet (future date)`);
