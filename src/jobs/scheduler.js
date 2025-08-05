@@ -12,8 +12,9 @@ function startScheduledJobs() {
   });
 
   // Check for trips that should become active (after 1-hour buffer) every 2 minutes
+  // This calls missionSchedulerService.checkAndActivateTrips() which includes 1-hour buffer logic
   cron.schedule('*/2 * * * *', async () => {
-    console.log('⏰ Checking for trips that should become active...');
+    console.log('⏰ Checking for trips that should become active (with 1-hour buffer)...');
     await checkTripsToActivate();
   });
 
@@ -147,7 +148,8 @@ async function checkTripsToActivate() {
   try {
     const missionSchedulerService = require('../services/missionScheduler.service');
     
-    // Use the existing method in missionSchedulerService
+    // Use the existing method in missionSchedulerService which includes 1-hour buffer logic
+    console.log('🔍 Calling missionSchedulerService.checkAndActivateTrips() with 1-hour buffer...');
     await missionSchedulerService.checkAndActivateTrips();
   } catch (error) {
     console.error('Error checking trips to activate:', error);

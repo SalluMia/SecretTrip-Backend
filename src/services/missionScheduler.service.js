@@ -12,11 +12,12 @@ class MissionSchedulerService {
 
   // Start the cron job to check for trips that should begin
   startScheduler() {
-    // Run every 30 minutes to check for trips that should start
-    cron.schedule('*/30 * * * *', async () => {
-      console.log('🕒 Checking for trips to activate...');
-      await this.checkAndActivateTrips();
-    });
+    // Trip activation is now handled by scheduler.js every 2 minutes
+    // This prevents conflicts and ensures consistent timing
+    // cron.schedule('*/30 * * * *', async () => {
+    //   console.log('🕒 Checking for trips to activate...');
+    //   await this.checkAndActivateTrips();
+    // });
 
     // Run daily at 6 AM to assign daily missions
     cron.schedule('0 6 * * *', async () => {
@@ -68,18 +69,25 @@ class MissionSchedulerService {
         const oneHourAfterStart = new Date(tripStartDate);
         oneHourAfterStart.setHours(oneHourAfterStart.getHours() + 1);
         
+        // ✅ LOGIC: For trips created today, apply 1-hour buffer. For future trips, activate immediately on start date
+        const isTodayTrip = tripStartDay.getTime() === today.getTime();
+        
         console.log(`🚀 Trip "${trip.name}": Start date is ${tripStartDay.toISOString()}, Today is ${today.toISOString()}`);
         console.log(`⏰ Trip start time: ${tripStartDate.toLocaleString()}`);
         console.log(`⏰ 1 hour after start: ${oneHourAfterStart.toLocaleString()}`);
         console.log(`⏰ Current time: ${now.toLocaleString()}`);
+        console.log(`📅 Is today's trip: ${isTodayTrip ? 'Yes' : 'No'}`);
         
-        // ✅ NEW: Only activate if the trip start date is today AND 1 hour has passed since start time
-        if (tripStartDay <= today && now >= oneHourAfterStart) {
-          console.log(`✅ Trip "${trip.name}" ready to activate (1 hour buffer passed)`);
+        if (isTodayTrip && now >= oneHourAfterStart) {
+          console.log(`✅ Trip "${trip.name}" ready to activate (1 hour buffer passed for today's trip)`);
           await this.activateTripAndAssignMissions(trip);
-        } else if (tripStartDay <= today) {
+        } else if (isTodayTrip) {
           const timeRemaining = Math.ceil((oneHourAfterStart - now) / (1000 * 60)); // minutes
           console.log(`⏳ Trip "${trip.name}" not ready to activate yet. ${timeRemaining} minutes remaining in buffer.`);
+        } else if (tripStartDay <= today) {
+          // Future trip that has reached its start date (no buffer needed)
+          console.log(`✅ Trip "${trip.name}" ready to activate (future trip reached start date)`);
+          await this.activateTripAndAssignMissions(trip);
         } else {
           console.log(`⏳ Trip "${trip.name}" not ready to activate yet (future date)`);
         }
