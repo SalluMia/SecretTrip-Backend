@@ -9,7 +9,7 @@ exports.unifiedPayment = async (req, res, next) => {
     const { 
       tripId, 
       albumId, 
-      amount, 
+      packageId, // New: package ID instead of static amount
       paymentType = 'hd-album', 
       paymentIntentId, 
       isSuccess = false,
@@ -22,8 +22,8 @@ exports.unifiedPayment = async (req, res, next) => {
       return errorResponse(res, 400, 'Trip ID and Album ID are required');
     }
 
-    if (!amount || amount < 100) { // Minimum 1 euro in cents
-      return errorResponse(res, 400, 'Valid amount is required (minimum €1.00)');
+    if (!packageId) {
+      return errorResponse(res, 400, 'Package ID is required');
     }
 
     let paymentResult;
@@ -37,7 +37,7 @@ exports.unifiedPayment = async (req, res, next) => {
         tripId,
         albumId,
         paymentIntentId,
-        amount
+        packageId
       });
 
       successResponse(res, 200, 'Payment processed successfully', paymentResult);
@@ -53,7 +53,7 @@ exports.unifiedPayment = async (req, res, next) => {
             userId,
             tripId,
             albumId,
-            amount
+            packageId
           });
         } else {
           // For React: Standard web flow
@@ -61,7 +61,7 @@ exports.unifiedPayment = async (req, res, next) => {
             userId,
             tripId,
             albumId,
-            amount
+            packageId
           });
         }
         break;
@@ -73,7 +73,7 @@ exports.unifiedPayment = async (req, res, next) => {
             userId,
             tripId,
             albumId,
-            amount,
+            packageId,
             paymentMethodData
           });
         } else {
@@ -82,7 +82,7 @@ exports.unifiedPayment = async (req, res, next) => {
             userId,
             tripId,
             albumId,
-            amount
+            packageId
           });
         }
         break;
@@ -373,22 +373,22 @@ exports.getAdminRevenueAnalytics = async (req, res, next) => {
 exports.processDirectPayment = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { tripId, albumId, amount } = req.body;
+    const { tripId, albumId, packageId } = req.body;
 
     // Validation
     if (!tripId || !albumId) {
       return errorResponse(res, 400, 'Trip ID and Album ID are required');
     }
 
-    if (!amount || amount < 100) { // Minimum 1 euro in cents
-      return errorResponse(res, 400, 'Valid amount is required (minimum €1.00)');
+    if (!packageId) {
+      return errorResponse(res, 400, 'Package ID is required');
     }
 
     const paymentResult = await paymentService.processDirectPayment({
       userId,
+      packageId,
       tripId,
-      albumId,
-      amount
+      albumId
     });
 
     successResponse(res, 200, 'Payment processed successfully', paymentResult);
@@ -437,7 +437,7 @@ exports.getFlutterIntegrationGuide = async (req, res, next) => {
           body: {
             tripId: 'string (required)',
             albumId: 'string (required)',
-            amount: 'number (required, in cents)',
+            packageId: 'string (required)',
             paymentType: 'hd-album',
             platform: 'mobile'
           },
@@ -467,7 +467,7 @@ exports.getFlutterIntegrationGuide = async (req, res, next) => {
           body: {
             tripId: 'string (required)',
             albumId: 'string (required)',
-            amount: 'number (required)',
+            packageId: 'string (required)',
             paymentIntentId: 'string (required)',
             isSuccess: true
           }
@@ -500,7 +500,7 @@ final response = await http.post(
   body: jsonEncode({
     'tripId': tripId,
     'albumId': albumId,
-    'amount': amount,
+    'packageId': packageId,
     'paymentType': 'hd-album',
     'platform': 'mobile'
   }),
@@ -530,7 +530,7 @@ try {
     body: jsonEncode({
       'tripId': tripId,
       'albumId': albumId,
-      'amount': amount,
+      'packageId': packageId,
       'paymentIntentId': paymentData['paymentIntentId'],
       'isSuccess': true
     }),

@@ -6,7 +6,7 @@ const HD_ALBUM_PRICE = 299; // in cents (€2.99)
 const CURRENCY = 'eur';
 
 // New function to handle direct payment success
-exports.handleDirectPaymentSuccess = async function ({ userId, tripId, albumId, paymentIntentId, amount }) {
+exports.handleDirectPaymentSuccess = async function ({ userId, tripId, albumId, paymentIntentId, packageId }) {
   try {
     console.log(`🎉 Processing direct payment success - User: ${userId}, Trip: ${tripId}, Album: ${albumId}`);
     
@@ -124,17 +124,21 @@ exports.checkHDAccess = async function (tripId) {
   }
 };
 
-exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, amount }) {
+exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, packageId }) {
   try {
-    console.log(`🔍 Creating payment intent for - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Amount: ${amount}`);
+    console.log(`🔍 Creating payment intent for - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Package: ${packageId}`);
     
-    // Convert amount to integer and validate
-    const amountInt = parseInt(amount);
-    if (!amountInt || amountInt <= 0) {
-      throw new Error('Valid amount is required');
+    // Get package details and validate
+    const packageDetails = await prisma.package.findUnique({
+      where: { id: packageId, status: 'ACTIVE' }
+    });
+
+    if (!packageDetails) {
+      throw new Error('Package not found or inactive');
     }
-    
-    console.log(`💰 Amount converted to integer: ${amountInt} cents`);
+
+    const amountInt = packageDetails.price;
+    console.log(`💰 Package price: ${amountInt} cents (€${(amountInt/100).toFixed(2)})`);
 
     const trip = await prisma.trip.findFirst({
       where: {
@@ -196,6 +200,8 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, 
         userId,
         tripId,
         albumId,
+        packageId,
+        packageName: packageDetails.name,
         type: 'album_hd',
         userEmail: user.email,
         userName: user.displayName,
@@ -236,17 +242,21 @@ exports.createHDAlbumPaymentIntent = async function ({ userId, tripId, albumId, 
 };
 
 // Flutter-specific payment intent creation
-exports.createHDAlbumPaymentIntentForMobile = async function ({ userId, tripId, albumId, amount }) {
+exports.createHDAlbumPaymentIntentForMobile = async function ({ userId, tripId, albumId, packageId }) {
   try {
-    console.log(`📱 Creating mobile payment intent for - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Amount: ${amount}`);
+    console.log(`📱 Creating mobile payment intent for - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Package: ${packageId}`);
     
-    // Convert amount to integer and validate
-    const amountInt = parseInt(amount);
-    if (!amountInt || amountInt <= 0) {
-      throw new Error('Valid amount is required');
+    // Get package details and validate
+    const packageDetails = await prisma.package.findUnique({
+      where: { id: packageId, status: 'ACTIVE' }
+    });
+
+    if (!packageDetails) {
+      throw new Error('Package not found or inactive');
     }
-    
-    console.log(`💰 Amount converted to integer: ${amountInt} cents`);
+
+    const amountInt = packageDetails.price;
+    console.log(`💰 Package price: ${amountInt} cents (€${(amountInt/100).toFixed(2)})`);
 
     const trip = await prisma.trip.findFirst({
       where: {
@@ -1244,7 +1254,7 @@ exports.getStripeFeeAnalytics = async function (startDate, endDate) {
 };
 
 // Unified direct payment processing
-exports.processDirectPayment = async function ({ userId, tripId, albumId, amount }) {
+exports.processDirectPayment = async function ({ userId, tripId, albumId, packageId }) {
   try {
     // Validate trip and album access
     const trip = await prisma.trip.findFirst({
@@ -1321,9 +1331,20 @@ exports.processDirectPayment = async function ({ userId, tripId, albumId, amount
 };
 
 // Flutter-specific direct payment processing
-exports.processDirectPaymentForMobile = async function ({ userId, tripId, albumId, amount, paymentMethodData }) {
+exports.processDirectPaymentForMobile = async function ({ userId, tripId, albumId, packageId, paymentMethodData }) {
   try {
-    console.log(`📱 Processing mobile direct payment - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Amount: ${amount}`);
+    console.log(`📱 Processing mobile direct payment - User: ${userId}, Trip: ${tripId}, Album: ${albumId}, Package: ${packageId}`);
+    
+    // Get package details and validate
+    const packageDetails = await prisma.package.findUnique({
+      where: { id: packageId, status: 'ACTIVE' }
+    });
+
+    if (!packageDetails) {
+      throw new Error('Package not found or inactive');
+    }
+
+    const amountInt = packageDetails.price;
     
     // Validate trip and album access
     const trip = await prisma.trip.findFirst({
@@ -1356,11 +1377,11 @@ exports.processDirectPaymentForMobile = async function ({ userId, tripId, albumI
       select: { email: true, displayName: true }
     });
 
-    console.log(`💳 Creating mobile direct payment intent - Amount: ${amount} cents`);
+    console.log(`💳 Creating mobile direct payment intent - Amount: ${amountInt} cents (€${(amountInt/100).toFixed(2)})`);
 
     // For mobile, create payment intent without immediate confirmation
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: amount,
+      amount: amountInt,
       currency: CURRENCY,
       automatic_payment_methods: { 
         enabled: true,
@@ -1370,6 +1391,8 @@ exports.processDirectPaymentForMobile = async function ({ userId, tripId, albumI
         userId,
         tripId,
         albumId,
+        packageId,
+        packageName: packageDetails.name,
         type: 'album_hd',
         platform: 'mobile',
         userEmail: user.email,
@@ -1388,7 +1411,7 @@ exports.processDirectPaymentForMobile = async function ({ userId, tripId, albumI
         userId,
         tripId,
         type: 'album_hd',
-        amount: amount,
+        amount: amountInt,
         currency: CURRENCY,
         status: 'pending',
         stripePaymentIntentId: paymentIntent.id
@@ -1401,7 +1424,7 @@ exports.processDirectPaymentForMobile = async function ({ userId, tripId, albumI
     return {
       paymentIntentId: paymentIntent.id,
       clientSecret: paymentIntent.client_secret,
-      amount: amount,
+      amount: amountInt,
       currency: CURRENCY,
       paymentId: payment.id,
       platform: 'mobile',

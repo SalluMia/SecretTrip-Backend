@@ -9,6 +9,7 @@ const missionRoutes = require('./mission.routes'); // NEW
 const albumRoutes = require('./album.routes');     // NEW
 const paymentRoutes = require('./payment.routes'); // NEW
 const notificationRoutes=require('./notification.routes')
+const packageRoutes = require('./package.routes'); // NEW
 const router = express.Router();
 
 router.use('/auth', authRoutes);
@@ -21,5 +22,6 @@ router.use('/missions', missionRoutes);     // NEW
 router.use('/albums', albumRoutes);         // NEW
 router.use('/payments', paymentRoutes);     // NEW
 router.use('/notifications', notificationRoutes);
+router.use('/packages', packageRoutes);     // NEW
 
 module.exports = router;

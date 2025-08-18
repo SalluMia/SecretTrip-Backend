@@ -338,7 +338,7 @@ exports.getFullTripDetail = async (tripId) => {
 // ============================Packages Servicses Function ===================================
 // Create a new package
 exports.createPackage = async ({ name, price, features }) => {
-  return await prisma.package.create({
+  const packageData = await prisma.package.create({
     data: {
       name,
       price,
@@ -346,19 +346,37 @@ exports.createPackage = async ({ name, price, features }) => {
       status: 'ACTIVE'
     }
   });
+
+  return {
+    ...packageData,
+    priceInEuros: (packageData.price / 100).toFixed(2),
+    priceInCents: packageData.price
+  };
 };
 
 exports.getAllPackages = async () => {
-  return await prisma.package.findMany({
+  const packages = await prisma.package.findMany({
     orderBy: { createdAt: 'desc' }
   });
+
+  return packages.map(pkg => ({
+    ...pkg,
+    priceInEuros: (pkg.price / 100).toFixed(2),
+    priceInCents: pkg.price
+  }));
 };
 
 exports.updatePackage = async (id, { name, price, features }) => {
-  return await prisma.package.update({
+  const packageData = await prisma.package.update({
     where: { id },
     data: { name, price, features }
   });
+
+  return {
+    ...packageData,
+    priceInEuros: (packageData.price / 100).toFixed(2),
+    priceInCents: packageData.price
+  };
 };
 
 exports.deletePackage = async (id) => {
