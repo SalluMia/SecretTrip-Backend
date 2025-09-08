@@ -32,7 +32,7 @@ const fileFilter = (req, file, cb) => {
 exports.getUploadMiddleware = () => {
   return multer({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 },
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit (increased from 10MB)
     fileFilter
   }).single('missionPhoto');
 };
@@ -43,7 +43,7 @@ exports.handleUploadError = (err, req, res, next) => {
     return res.status(400).json({
       success: false,
       message: err.code === 'LIMIT_FILE_SIZE'
-        ? 'File too large. Max is 10MB.'
+        ? 'File too large. Max is 50MB.'
         : 'Multer error: ' + err.message
     });
   }

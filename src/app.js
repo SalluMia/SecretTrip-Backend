@@ -48,9 +48,9 @@ const corsOptions = {
 // ✅ Use the properly configured CORS options
 app.use(cors(corsOptions));
 
-// ✅ Body parsing middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ✅ Body parsing middleware with increased limits
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ✅ Static file serving for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
