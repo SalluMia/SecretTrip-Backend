@@ -182,14 +182,29 @@ class MissionSchedulerService {
       isActive: true
     };
 
+    // Map trip theme to mission template category
+    let targetCategory;
+    switch (theme.toLowerCase()) {
+      case 'aesthetic':
+        targetCategory = 'AESTHETIC';
+        break;
+      case 'secretagent':
+        targetCategory = 'SECRET_AGENT';
+        break;
+      default:
+        // Fallback to aesthetic if theme is unknown
+        targetCategory = 'AESTHETIC';
+        console.warn(`Unknown theme "${theme}", defaulting to AESTHETIC`);
+    }
+
     if (tripMode === 'fun') {
       // Fun mode: mix of aesthetic and secret agent (2/7 chance for fun missions)
       whereClause.category = {
         in: ['AESTHETIC', 'SECRET_AGENT']
       };
     } else {
-      // Normal mode: only aesthetic
-      whereClause.category = 'AESTHETIC';
+      // Normal mode: use the category that matches the trip theme
+      whereClause.category = targetCategory;
     }
 
     const templates = await prisma.missionTemplate.findMany({
@@ -198,9 +213,10 @@ class MissionSchedulerService {
     });
 
     if (templates.length === 0) {
-      throw new Error(`No mission templates found for theme: ${theme}, mode: ${tripMode}`);
+      throw new Error(`No mission templates found for theme: ${theme}, mode: ${tripMode}, category: ${targetCategory}`);
     }
 
+    console.log(`🎯 Found ${templates.length} mission templates for theme: ${theme} (${targetCategory}), mode: ${tripMode}`);
     return templates;
   }
 
