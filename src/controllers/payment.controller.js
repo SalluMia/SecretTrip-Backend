@@ -9,7 +9,8 @@ exports.unifiedPayment = async (req, res, next) => {
     const { 
       tripId, 
       albumId, 
-      packageId, // New: package ID instead of static amount
+      // packageId, // Commented out: package ID instead of static amount
+      amount, // Direct amount from request body
       paymentType = 'hd-album', 
       paymentIntentId, 
       isSuccess = false,
@@ -22,8 +23,8 @@ exports.unifiedPayment = async (req, res, next) => {
       return errorResponse(res, 400, 'Trip ID and Album ID are required');
     }
 
-    if (!packageId) {
-      return errorResponse(res, 400, 'Package ID is required');
+    if (!amount) {
+      return errorResponse(res, 400, 'Amount is required');
     }
 
     let paymentResult;
@@ -37,7 +38,7 @@ exports.unifiedPayment = async (req, res, next) => {
         tripId,
         albumId,
         paymentIntentId,
-        packageId
+        amount
       });
 
       successResponse(res, 200, 'Payment processed successfully', paymentResult);
@@ -53,7 +54,7 @@ exports.unifiedPayment = async (req, res, next) => {
             userId,
             tripId,
             albumId,
-            packageId
+            amount
           });
         } else {
           // For React: Standard web flow
@@ -61,7 +62,7 @@ exports.unifiedPayment = async (req, res, next) => {
             userId,
             tripId,
             albumId,
-            packageId
+            amount
           });
         }
         break;
@@ -73,7 +74,7 @@ exports.unifiedPayment = async (req, res, next) => {
             userId,
             tripId,
             albumId,
-            packageId,
+            amount,
             paymentMethodData
           });
         } else {
@@ -82,7 +83,7 @@ exports.unifiedPayment = async (req, res, next) => {
             userId,
             tripId,
             albumId,
-            packageId
+            amount
           });
         }
         break;
@@ -437,7 +438,7 @@ exports.getFlutterIntegrationGuide = async (req, res, next) => {
           body: {
             tripId: 'string (required)',
             albumId: 'string (required)',
-            packageId: 'string (required)',
+            amount: 'number (required)',
             paymentType: 'hd-album',
             platform: 'mobile'
           },
@@ -467,7 +468,7 @@ exports.getFlutterIntegrationGuide = async (req, res, next) => {
           body: {
             tripId: 'string (required)',
             albumId: 'string (required)',
-            packageId: 'string (required)',
+            amount: 'number (required)',
             paymentIntentId: 'string (required)',
             isSuccess: true
           }
@@ -500,7 +501,7 @@ final response = await http.post(
   body: jsonEncode({
     'tripId': tripId,
     'albumId': albumId,
-    'packageId': packageId,
+    'amount': amount,
     'paymentType': 'hd-album',
     'platform': 'mobile'
   }),
@@ -530,7 +531,7 @@ try {
     body: jsonEncode({
       'tripId': tripId,
       'albumId': albumId,
-      'packageId': packageId,
+      'amount': amount,
       'paymentIntentId': paymentData['paymentIntentId'],
       'isSuccess': true
     }),
