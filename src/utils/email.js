@@ -1,11 +1,13 @@
 const nodemailer = require('nodemailer');
 
-// Create transporter with optimized settings for faster delivery
+// Create transporter with Hostinger SMTP settings
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.hostinger.com',
+  port: 465,
+  secure: true, // true for 465, false for other ports
   auth: {
-    user: process.env.EMAIL_USER, // your gmail
-    pass: process.env.EMAIL_PASS  // app password
+    user: process.env.EMAIL_USER, // your hostinger email
+    pass: process.env.EMAIL_PASS  // your hostinger email password
   },
   // Optimize for faster delivery
   pool: true, // Use pooled connections
@@ -17,7 +19,6 @@ const transporter = nodemailer.createTransport({
   greetingTimeout: 5000, // 5 seconds
   socketTimeout: 10000, // 10 seconds
   // TLS settings for better delivery
-  secure: true,
   tls: {
     rejectUnauthorized: false
   }
