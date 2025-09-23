@@ -142,10 +142,17 @@ exports.submitMissionPhoto = async (req, res, next) => {
       return errorResponse(res, 400, 'Mission photo is required');
     }
 
+    // Use Scaleway upload result if available, otherwise fallback to legacy
+    const photoData = req.file.scaleway || {
+      buffer: req.file.buffer,
+      originalname: req.file.originalname
+    };
+
     const result = await missionPhotoService.submitMissionPhoto({
       missionId,
       userId,
-      photoPath: req.file.path,
+      photoBuffer: photoData.buffer || req.file.buffer,
+      originalName: photoData.originalname || req.file.originalname,
       caption
     });
 

@@ -24,7 +24,8 @@ exports.completeProfile = async (req, res, next) => {
       }
 
 
-    const profilePhotoPath = req.file ? req.file.path : null;
+    // Use Scaleway upload result if available, otherwise fallback to legacy
+    const profilePhotoPath = req.file ? (req.file.scaleway ? req.file.scaleway.url : req.file.path) : null;
    
     const data = await profileService.completeProfile({
       userId,
@@ -67,7 +68,8 @@ exports.updateProfile = async (req, res, next) => {
       }
     }
 
-    const profilePhotoPath = req.file ? req.file.path : null;
+    // Use Scaleway upload result if available, otherwise fallback to legacy
+    const profilePhotoPath = req.file ? (req.file.scaleway ? req.file.scaleway.url : req.file.path) : null;
 
     const data = await profileService.updateProfile({
       userId,

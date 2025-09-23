@@ -5,9 +5,11 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
 
 const notificationService = require('./notification.service');
 const { formatDate } = require('../utils/dateUtils');
+const scalewayStorage = require('./scalewayStorage.service');
 
 // ✅ IMPROVED: Better path handling and error checking
 function initializeDirectories() {
@@ -34,8 +36,8 @@ function initializeDirectories() {
 // Initialize directories on module load
 initializeDirectories();
 
-// ✅ FIXED: Complete photo path resolution function
-function resolvePhotoPath(photoUrl) {
+// ✅ FIXED: Complete photo path resolution function - Updated for Scaleway
+async function resolvePhotoPath(photoUrl) {
   console.log(`🔍 Resolving photo path for URL: ${photoUrl}`);
   
   if (!photoUrl) {
@@ -46,6 +48,39 @@ function resolvePhotoPath(photoUrl) {
   // Clean the URL - remove any query parameters or fragments
   const cleanUrl = photoUrl.split('?')[0].split('#')[0];
   
+  // Check if it's a Scaleway URL
+  if (cleanUrl.includes('scw.cloud') || cleanUrl.includes('scaleway')) {
+    console.log('🌐 Scaleway URL detected, downloading image...');
+    try {
+      // Download image from Scaleway
+      const response = await axios.get(cleanUrl, {
+        responseType: 'arraybuffer',
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'SecretTrip-PDF-Generator'
+        }
+      });
+      
+      // Create temporary file
+      const tempDir = path.join(__dirname, '..', 'temp');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      
+      const tempFileName = `temp_${Date.now()}_${uuidv4()}.jpg`;
+      const tempPath = path.join(tempDir, tempFileName);
+      
+      fs.writeFileSync(tempPath, response.data);
+      
+      console.log(`✅ Downloaded image to temp file: ${tempPath}`);
+      return tempPath;
+    } catch (error) {
+      console.error('❌ Error downloading image from Scaleway:', error.message);
+      return null;
+    }
+  }
+  
+  // Handle local file paths (legacy support)
   let photoPath;
   
   if (cleanUrl.startsWith('http')) {
@@ -326,28 +361,25 @@ exports.generateTripAlbum = async function(tripId) {
   }
 };
 
-// ✅ IMPROVED: Create PDF with better photo handling and fallbacks
+// ✅ IMPROVED: Create PDF with better photo handling and fallbacks - Updated for Scaleway
 exports.createPDF = async (trip, quality = 'standard') => {
   try {
     console.log(`🚀 Starting PDF creation for trip ${trip.id}, quality: ${quality}`);
     
     const fileName = `album_${trip.id}_${quality}_${Date.now()}.pdf`;
-    const staticDir = path.join(__dirname, '..', 'uploads');
-    const uploadsDir = path.join(staticDir, 'albums', quality);
-    const filePath = path.join(uploadsDir, fileName);
-    const urlPath = `/uploads/albums/${quality}/${fileName}`;
-
-    console.log(`📁 Target directory: ${uploadsDir}`);
-    console.log(`📄 Full file path: ${filePath}`);
-    console.log(`🔗 URL path: ${urlPath}`);
-
-    if (!fs.existsSync(uploadsDir)) {
-      console.log(`📁 Creating directory: ${uploadsDir}`);
-      fs.mkdirSync(uploadsDir, { recursive: true });
+    
+    // Create temporary directory for PDF generation
+    const tempDir = path.join(__dirname, '..', 'temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
     }
+    
+    const tempFilePath = path.join(tempDir, fileName);
+
+    console.log(`📁 Temp file path: ${tempFilePath}`);
 
     const doc = new PDFDocument({ margin: 50 });
-    const writeStream = fs.createWriteStream(filePath);
+    const writeStream = fs.createWriteStream(tempFilePath);
     
     writeStream.on('error', (error) => {
       console.error('❌ Write stream error:', error);
@@ -378,7 +410,7 @@ exports.createPDF = async (trip, quality = 'standard') => {
       console.log(`\n🎯 Processing mission: ${mission.missionTemplate?.title || 'Untitled Mission'}`);
       console.log(`📸 Original photo URL: ${mission.photoUrl}`);
       
-      const photoPath = resolvePhotoPath(mission.photoUrl);
+      const photoPath = await resolvePhotoPath(mission.photoUrl);
       
       // Add mission info to PDF
       doc.fontSize(14).font('Helvetica-Bold').text(mission.missionTemplate?.title || 'Mission Photo');
@@ -496,21 +528,39 @@ exports.createPDF = async (trip, quality = 'standard') => {
       writeStream.on('error', reject);
     });
 
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`PDF file was not created at: ${filePath}`);
+    if (!fs.existsSync(tempFilePath)) {
+      throw new Error(`PDF file was not created at: ${tempFilePath}`);
     }
 
-    const stats = fs.statSync(filePath);
-    console.log(`📄 PDF created successfully at ${filePath}`);
+    const stats = fs.statSync(tempFilePath);
+    console.log(`📄 PDF created successfully at ${tempFilePath}`);
     console.log(`📊 File size: ${stats.size} bytes`);
     console.log(`📸 Photo statistics: ${successfulPhotos} successful, ${skippedPhotos} skipped`);
-    console.log(`🔗 URL: ${urlPath}`);
+
+    // Upload PDF to Scaleway
+    console.log('🌐 Uploading PDF to Scaleway...');
+    const uploadResult = await scalewayStorage.uploadLocalFile(
+      tempFilePath,
+      'albums',
+      fileName
+    );
+
+    // Clean up temporary file
+    try {
+      fs.unlinkSync(tempFilePath);
+      console.log('🗑️ Cleaned up temporary PDF file');
+    } catch (cleanupError) {
+      console.warn('⚠️ Could not clean up temporary file:', cleanupError.message);
+    }
+
+    console.log(`🔗 Scaleway URL: ${uploadResult.url}`);
 
     return {
-      filePath,
-      urlPath,
+      filePath: tempFilePath, // Keep for backward compatibility
+      urlPath: uploadResult.url, // Now points to Scaleway
       fileName,
       size: stats.size,
+      scalewayKey: uploadResult.key,
       photoStats: {
         successful: successfulPhotos,
         skipped: skippedPhotos,

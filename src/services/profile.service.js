@@ -1,6 +1,15 @@
 const { prisma } = require('../config/prisma');
 const fs = require('fs');
 const path = require('path');
+const scalewayStorage = require('./scalewayStorage.service');
+
+// Helper function to ensure URLs are accessible (simplified for public bucket)
+async function ensureAccessibleUrl(url) {
+  if (!url) return null;
+  
+  // For public bucket, URLs are directly accessible
+  return url;
+}
 
 const AVAILABLE_INTERESTS = [
   'Adventure',
@@ -41,16 +50,7 @@ exports.completeProfile = async ({ userId, travelInterests, profilePhotoPath }) 
     throw new Error('One or more selected interests are invalid');
   }
 
-  // Optional: delete old profile photo
-  const existingUser = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { profilePhotoUrl: true }
-  });
-
-  if (existingUser?.profilePhotoUrl && profilePhotoPath) {
-    const oldPath = path.join(__dirname, '../uploads/profile-photos', path.basename(existingUser.profilePhotoUrl));
-    if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-  }
+  // Note: Old profile photo deletion is now handled in the middleware
 
   const updateData = {
     isProfileCompleted: true,
@@ -60,7 +60,27 @@ exports.completeProfile = async ({ userId, travelInterests, profilePhotoPath }) 
   };
 
   if (profilePhotoPath) {
-    updateData.profilePhotoUrl = `/uploads/profile-photos/${path.basename(profilePhotoPath)}`;
+    // Check if it's already a Scaleway URL or a local file path
+    if (profilePhotoPath.startsWith('http') && profilePhotoPath.includes('scw.cloud')) {
+      // Already uploaded to Scaleway by middleware, use the URL directly
+      updateData.profilePhotoUrl = profilePhotoPath;
+      console.log('✅ Using Scaleway URL from middleware for profile photo');
+    } else {
+      // This is a local file path (legacy fallback)
+      // Upload new profile photo to Scaleway with consistent filename
+      try {
+        const uploadResult = await scalewayStorage.uploadLocalFile(
+          profilePhotoPath,
+          'profile-photos',
+          `profile_${userId}.jpg`
+        );
+        updateData.profilePhotoUrl = uploadResult.url;
+        console.log('✅ Profile photo uploaded to Scaleway with consistent filename');
+      } catch (error) {
+        console.error('Error uploading profile photo to Scaleway:', error);
+        throw new Error('Failed to upload profile photo');
+      }
+    }
   }
 
   const updatedUser = await prisma.user.update({
@@ -102,6 +122,11 @@ exports.getUserProfile = async ({ userId }) => {
 
   if (!user) {
     throw new Error('User not found');
+  }
+
+  // Ensure profile photo URL is accessible
+  if (user.profilePhotoUrl) {
+    user.profilePhotoUrl = await ensureAccessibleUrl(user.profilePhotoUrl);
   }
 
   return { user };
@@ -168,18 +193,27 @@ exports.updateProfile = async ({ userId, displayName, travelInterests, profilePh
 
   // ✅ Handle profile photo update
   if (profilePhotoPath) {
-    if (existingUser.profilePhotoUrl) {
-      const oldPath = path.join(__dirname, '../uploads/profile-photos', path.basename(existingUser.profilePhotoUrl));
-      if (fs.existsSync(oldPath)) {
-        try {
-          fs.unlinkSync(oldPath);
-        } catch (err) {
-          console.error('Error deleting old photo:', err);
-        }
+    // Check if it's already a Scaleway URL or a local file path
+    if (profilePhotoPath.startsWith('http') && profilePhotoPath.includes('scw.cloud')) {
+      // Already uploaded to Scaleway by middleware, use the URL directly
+      updateData.profilePhotoUrl = profilePhotoPath;
+      console.log('✅ Using Scaleway URL from middleware for profile photo');
+    } else {
+      // This is a local file path (legacy fallback)
+      // Upload new profile photo to Scaleway with consistent filename
+      try {
+        const uploadResult = await scalewayStorage.uploadLocalFile(
+          profilePhotoPath,
+          'profile-photos',
+          `profile_${userId}.jpg`
+        );
+        updateData.profilePhotoUrl = uploadResult.url;
+        console.log('✅ Profile photo uploaded to Scaleway with consistent filename');
+      } catch (error) {
+        console.error('Error uploading profile photo to Scaleway:', error);
+        throw new Error('Failed to upload profile photo');
       }
     }
-
-    updateData.profilePhotoUrl = `/uploads/profile-photos/${path.basename(profilePhotoPath)}`;
   }
 
   // Only update if there's something to update
@@ -204,6 +238,11 @@ exports.updateProfile = async ({ userId, displayName, travelInterests, profilePh
     }
   });
 
+  // Ensure profile photo URL is accessible
+  if (updatedUser.profilePhotoUrl) {
+    updatedUser.profilePhotoUrl = await ensureAccessibleUrl(updatedUser.profilePhotoUrl);
+  }
+
   return {
     user: updatedUser,
     message: 'Profile updated successfully'
@@ -217,4 +256,86 @@ exports.getTravelInterests = async () => {
     interests: AVAILABLE_INTERESTS,
     maxSelection: 5
   };
+};
+
+// Clean up orphaned profile photos (utility function)
+exports.cleanupOrphanedPhotos = async () => {
+  try {
+    console.log('🧹 Starting cleanup of orphaned profile photos...');
+    
+    // Get all users with profile photos
+    const users = await prisma.user.findMany({
+      where: {
+        profilePhotoUrl: { not: null }
+      },
+      select: {
+        id: true,
+        profilePhotoUrl: true
+      }
+    });
+    
+    console.log(`📊 Found ${users.length} users with profile photos`);
+    
+    // Get all files in the profile-photos folder
+    const { S3Client, ListObjectsV2Command, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+    
+    const s3Client = new S3Client({
+      region: process.env.SCALEWAY_REGION || 'nl-ams',
+      endpoint: `https://s3.${process.env.SCALEWAY_REGION || 'nl-ams'}.scw.cloud`,
+      credentials: {
+        accessKeyId: process.env.SCALEWAY_ACCESS_KEY_ID,
+        secretAccessKey: process.env.SCALEWAY_SECRET_ACCESS_KEY,
+      },
+      forcePathStyle: true,
+    });
+    
+    const listCommand = new ListObjectsV2Command({
+      Bucket: process.env.SCALEWAY_BUCKET_NAME || 'secret-trip-storage',
+      Prefix: 'profile-photos/'
+    });
+    
+    const response = await s3Client.send(listCommand);
+    const files = response.Contents || [];
+    
+    console.log(`📁 Found ${files.length} files in profile-photos folder`);
+    
+    // Create a set of active photo URLs
+    const activePhotoKeys = new Set();
+    users.forEach(user => {
+      if (user.profilePhotoUrl) {
+        const key = scalewayStorage.extractKeyFromUrl(user.profilePhotoUrl);
+        if (key) {
+          activePhotoKeys.add(key);
+        }
+      }
+    });
+    
+    console.log(`✅ Found ${activePhotoKeys.size} active profile photos`);
+    
+    // Delete orphaned files
+    let deletedCount = 0;
+    for (const file of files) {
+      if (!activePhotoKeys.has(file.Key)) {
+        try {
+          const deleteCommand = new DeleteObjectCommand({
+            Bucket: process.env.SCALEWAY_BUCKET_NAME || 'secret-trip-storage',
+            Key: file.Key
+          });
+          
+          await s3Client.send(deleteCommand);
+          console.log(`🗑️ Deleted orphaned file: ${file.Key}`);
+          deletedCount++;
+        } catch (error) {
+          console.error(`❌ Error deleting ${file.Key}:`, error.message);
+        }
+      }
+    }
+    
+    console.log(`🎉 Cleanup complete! Deleted ${deletedCount} orphaned files`);
+    return { deletedCount, totalFiles: files.length, activePhotos: activePhotoKeys.size };
+    
+  } catch (error) {
+    console.error('❌ Error during cleanup:', error);
+    throw error;
+  }
 };

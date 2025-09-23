@@ -1,5 +1,6 @@
 const { default: axios } = require('axios');
 const adminService = require('../services/admin.service');
+const profileService = require('../services/profile.service');
 const { successResponse, errorResponse } = require('../utils/response');
 const fs = require('fs');
 const path = require('path');
@@ -461,6 +462,26 @@ exports.downloadPDFByPath = async (req, res, next) => {
     if (!res.headersSent) {
       return errorResponse(res, 500, 'Internal server error while downloading PDF');
     }
+  }
+};
+
+// Clean up orphaned profile photos
+exports.cleanupOrphanedPhotos = async (req, res, next) => {
+  try {
+    console.log('🧹 Admin requested cleanup of orphaned profile photos');
+    
+    const result = await profileService.cleanupOrphanedPhotos();
+    
+    successResponse(res, 200, 'Cleanup completed successfully', {
+      deletedCount: result.deletedCount,
+      totalFiles: result.totalFiles,
+      activePhotos: result.activePhotos,
+      message: `Cleaned up ${result.deletedCount} orphaned files`
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in cleanupOrphanedPhotos:', error);
+    next(error);
   }
 };
 

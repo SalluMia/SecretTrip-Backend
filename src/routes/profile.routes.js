@@ -6,7 +6,7 @@ const {
   getTravelInterests 
 } = require('../controllers/profile.controller');
 const authMiddleware = require('../middlewares/auth');
-const { uploadProfilePhoto, handleMulterError } = require('../middlewares/upload');
+const { uploadProfilePhoto, handleMulterError, uploadToScaleway } = require('../middlewares/scalewayUpload');
 
 const router = express.Router();
 
@@ -17,12 +17,12 @@ router.get('/travel-interests', getTravelInterests);
 router.use(authMiddleware);
 
 // Complete user profile
-router.post('/complete-profile', uploadProfilePhoto, handleMulterError, completeProfile);
+router.post('/complete-profile', uploadProfilePhoto, handleMulterError, uploadToScaleway, completeProfile);
 
 // Get user profile
 router.get('/me', getUserProfile);
 
 // Update user profile
-router.put('/update', uploadProfilePhoto, handleMulterError, updateProfile);
+router.put('/update', uploadProfilePhoto, handleMulterError, uploadToScaleway, updateProfile);
 
 module.exports = router;

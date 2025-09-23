@@ -53,4 +53,7 @@ router.post('/trips/:tripId/activate-manual', adminController.manuallyActivateTr
 
 router.get('/payment/analytics', paymentController.getAdminRevenueAnalytics);
 
+// Storage Management
+router.post('/cleanup-orphaned-photos', adminController.cleanupOrphanedPhotos);
+
 module.exports = router;

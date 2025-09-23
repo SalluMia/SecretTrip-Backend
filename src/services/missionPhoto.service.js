@@ -4,6 +4,15 @@ const path = require('path');
 const fs = require('fs');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
+const scalewayStorage = require('./scalewayStorage.service');
+
+// Helper function to ensure URLs are accessible (simplified for public bucket)
+async function ensureAccessibleUrl(url) {
+  if (!url) return null;
+  
+  // For public bucket, URLs are directly accessible
+  return url;
+}
 
 // 📂 Setup upload path
 const storage = multer.diskStorage({
@@ -54,7 +63,7 @@ exports.handleUploadError = (err, req, res, next) => {
 };
 
 // 📸 Submit mission photo
-exports.submitMissionPhoto = async ({ missionId, userId, photoPath, caption = null }) => {
+exports.submitMissionPhoto = async ({ missionId, userId, photoBuffer, originalName, caption = null }) => {
   try {
     const mission = await prisma.assignedMission.findUnique({
       where: { id: missionId },
@@ -66,14 +75,41 @@ exports.submitMissionPhoto = async ({ missionId, userId, photoPath, caption = nu
     if (mission.completed) throw new Error('Already completed');
     if (mission.trip.status !== 'ACTIVE') throw new Error('Trip not active');
 
-    const processedImagePath = await exports.processImage(photoPath);
-    const thumbnailPath = await exports.generateThumbnail(processedImagePath);
+    // Process image in memory
+    const processedImageBuffer = await exports.processImageBuffer(photoBuffer);
+    const thumbnailBuffer = await exports.generateThumbnailBuffer(processedImageBuffer);
+
+    // Generate unique filenames
+    const processedFileName = scalewayStorage.generateUniqueFileName(
+      originalName, 
+      `mission_${missionId}_processed`
+    );
+    const thumbnailFileName = scalewayStorage.generateUniqueFileName(
+      originalName, 
+      `mission_${missionId}_thumb`
+    );
+
+    // Upload to Scaleway
+    const [processedUpload, thumbnailUpload] = await Promise.all([
+      scalewayStorage.uploadFile(
+        processedImageBuffer,
+        processedFileName,
+        'mission-photos',
+        'image/jpeg'
+      ),
+      scalewayStorage.uploadFile(
+        thumbnailBuffer,
+        thumbnailFileName,
+        'mission-photos/thumbnails',
+        'image/jpeg'
+      )
+    ]);
 
     const updatedMission = await prisma.assignedMission.update({
       where: { id: missionId },
       data: {
-        photoUrl: `/uploads/mission-photos/${path.basename(processedImagePath)}`,
-        thumbnailUrl: `/uploads/mission-photos/thumbnails/${path.basename(thumbnailPath)}`,
+        photoUrl: processedUpload.url,
+        thumbnailUrl: thumbnailUpload.url,
         caption,
         completed: true,
         submittedAt: new Date()
@@ -93,25 +129,49 @@ exports.submitMissionPhoto = async ({ missionId, userId, photoPath, caption = nu
       data: { completedMissions }
     });
 
-    if (photoPath !== processedImagePath) {
-      try { fs.unlinkSync(photoPath); } catch (err) { console.error(err); }
-    }
+    // Ensure URLs are accessible
+    const accessiblePhotoUrl = await ensureAccessibleUrl(updatedMission.photoUrl);
+    const accessibleThumbnailUrl = await ensureAccessibleUrl(updatedMission.thumbnailUrl);
 
     return {
       mission: updatedMission,
       message: 'Mission completed successfully!',
-      photoUrl: updatedMission.photoUrl,
-      thumbnailUrl: updatedMission.thumbnailUrl
+      photoUrl: accessiblePhotoUrl,
+      thumbnailUrl: accessibleThumbnailUrl
     };
   } catch (error) {
-    if (photoPath && fs.existsSync(photoPath)) {
-      try { fs.unlinkSync(photoPath); } catch (err) { console.error(err); }
-    }
+    console.error('Error submitting mission photo:', error);
     throw error;
   }
 };
 
-// 🧠 Process full-size image
+// 🧠 Process full-size image (buffer version for Scaleway)
+exports.processImageBuffer = async (imageBuffer) => {
+  try {
+    return await sharp(imageBuffer)
+      .resize(1920, 1080, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85, progressive: true })
+      .toBuffer();
+  } catch (err) {
+    console.error('Image processing failed:', err);
+    return imageBuffer; // Return original if processing fails
+  }
+};
+
+// 🧩 Create thumbnail (buffer version for Scaleway)
+exports.generateThumbnailBuffer = async (imageBuffer) => {
+  try {
+    return await sharp(imageBuffer)
+      .resize(300, 300, { fit: 'cover', position: 'center' })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+  } catch (err) {
+    console.error('Thumbnail generation failed:', err);
+    return imageBuffer; // Return original if processing fails
+  }
+};
+
+// 🧠 Process full-size image (legacy file version - kept for compatibility)
 exports.processImage = async (originalPath) => {
   try {
     const outputPath = originalPath.replace(path.extname(originalPath), '_processed.jpg');
@@ -126,7 +186,7 @@ exports.processImage = async (originalPath) => {
   }
 };
 
-// 🧩 Create thumbnail
+// 🧩 Create thumbnail (legacy file version - kept for compatibility)
 exports.generateThumbnail = async (imagePath) => {
   try {
     const thumbDir = path.join(path.dirname(imagePath), 'thumbnails');
@@ -185,53 +245,62 @@ exports.getUserMissions = async ({ userId, tripId, status = null }) => {
     ]
   });
 
-  return missions.map(m => ({
-    // Assigned Mission Data
-    id: m.id,
-    userId: m.userId,
-    tripId: m.tripId,
-    completed: m.completed,
-    photoUrl: m.photoUrl,
-    thumbnailUrl: m.thumbnailUrl,
-    caption: m.caption,
-    dayAssigned: m.dayAssigned,
-    submittedAt: m.submittedAt,
-    createdAt: m.createdAt,
-    
-    // Mission Template Data (priority given to template, fallback to assigned mission)
-    missionTemplateId: m.missionTemplateId,
-    title: m.missionTemplate?.title || m.title,
-    instruction: m.missionTemplate?.instruction || m.instruction,
-    category: m.missionTemplate?.category || m.category,
-    sampleImageUrl: m.missionTemplate?.sampleImageUrl || m.sampleImageUrl,
-    level: m.missionTemplate?.level || 'NORMAL',
-    location: m.missionTemplate?.location,
-    
-    // Trip Data
-    tripName: m.trip.name,
-    tripStatus: m.trip.status,
-    tripTheme: m.trip.theme,
-    tripMode: m.trip.tripMode,
-    
-    // Complete Mission Template Object
-    missionTemplate: m.missionTemplate ? {
-      id: m.missionTemplate.id,
-      title: m.missionTemplate.title,
-      instruction: m.missionTemplate.instruction,
-      category: m.missionTemplate.category,
-      level: m.missionTemplate.level,
-      location: m.missionTemplate.location,
-      sampleImageUrl: m.missionTemplate.sampleImageUrl,
-      isActive: m.missionTemplate.isActive,
-      createdAt: m.missionTemplate.createdAt,
-      updatedAt: m.missionTemplate.updatedAt
-    } : null,
-    
-    // Computed fields
-    canSubmit: m.trip.status === 'ACTIVE' && !m.completed,
-    submitted: !!m.photoUrl || !!m.submittedAt,
-    canSwap: m.trip.status === 'ACTIVE' && !m.completed
+  // Process missions and ensure URLs are accessible
+  const processedMissions = await Promise.all(missions.map(async (m) => {
+    const accessiblePhotoUrl = await ensureAccessibleUrl(m.photoUrl);
+    const accessibleThumbnailUrl = await ensureAccessibleUrl(m.thumbnailUrl);
+    const accessibleSampleImageUrl = await ensureAccessibleUrl(m.missionTemplate?.sampleImageUrl || m.sampleImageUrl);
+
+    return {
+      // Assigned Mission Data
+      id: m.id,
+      userId: m.userId,
+      tripId: m.tripId,
+      completed: m.completed,
+      photoUrl: accessiblePhotoUrl,
+      thumbnailUrl: accessibleThumbnailUrl,
+      caption: m.caption,
+      dayAssigned: m.dayAssigned,
+      submittedAt: m.submittedAt,
+      createdAt: m.createdAt,
+      
+      // Mission Template Data (priority given to template, fallback to assigned mission)
+      missionTemplateId: m.missionTemplateId,
+      title: m.missionTemplate?.title || m.title,
+      instruction: m.missionTemplate?.instruction || m.instruction,
+      category: m.missionTemplate?.category || m.category,
+      sampleImageUrl: accessibleSampleImageUrl,
+      level: m.missionTemplate?.level || 'NORMAL',
+      location: m.missionTemplate?.location,
+      
+      // Trip Data
+      tripName: m.trip.name,
+      tripStatus: m.trip.status,
+      tripTheme: m.trip.theme,
+      tripMode: m.trip.tripMode,
+      
+      // Complete Mission Template Object
+      missionTemplate: m.missionTemplate ? {
+        id: m.missionTemplate.id,
+        title: m.missionTemplate.title,
+        instruction: m.missionTemplate.instruction,
+        category: m.missionTemplate.category,
+        level: m.missionTemplate.level,
+        location: m.missionTemplate.location,
+        sampleImageUrl: accessibleSampleImageUrl,
+        isActive: m.missionTemplate.isActive,
+        createdAt: m.missionTemplate.createdAt,
+        updatedAt: m.missionTemplate.updatedAt
+      } : null,
+      
+      // Computed fields
+      canSubmit: m.trip.status === 'ACTIVE' && !m.completed,
+      submitted: !!m.photoUrl || !!m.submittedAt,
+      canSwap: m.trip.status === 'ACTIVE' && !m.completed
+    };
   }));
+
+  return processedMissions;
 };
 
 // Enhanced getMissionDetail WITH MISSION TEMPLATE DATA
@@ -393,15 +462,20 @@ exports.retakeMissionPhoto = async ({ missionId, userId }) => {
   if (mission.userId !== userId) throw new Error('Unauthorized');
   if (mission.trip.status !== 'ACTIVE') throw new Error('Trip not active');
 
-  // delete previous files
+  // Delete previous files from Scaleway
   if (mission.photoUrl) {
-    const full = path.join(__dirname, '../uploads/mission-photos', path.basename(mission.photoUrl));
-    const thumb = path.join(__dirname, '../uploads/mission-photos/thumbnails', path.basename(mission.photoUrl));
     try {
-      if (fs.existsSync(full)) fs.unlinkSync(full);
-      if (fs.existsSync(thumb)) fs.unlinkSync(thumb);
+      const photoKey = scalewayStorage.extractKeyFromUrl(mission.photoUrl);
+      const thumbnailKey = scalewayStorage.extractKeyFromUrl(mission.thumbnailUrl);
+      
+      if (photoKey) {
+        await scalewayStorage.deleteFile(photoKey);
+      }
+      if (thumbnailKey) {
+        await scalewayStorage.deleteFile(thumbnailKey);
+      }
     } catch (err) {
-      console.error('Error deleting old photo files:', err);
+      console.error('Error deleting old photo files from Scaleway:', err);
     }
   }
 
