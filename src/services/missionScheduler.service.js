@@ -134,11 +134,24 @@ class MissionSchedulerService {
         }
       });
 
-      // Send activation notifications
-      await notificationService.sendTripActivationNotification({
-        tripId: trip.id,
-        tripName: trip.name
-      });
+      // Send activation notifications (don't let FCM errors crash trip activation)
+      try {
+        const notificationResult = await notificationService.sendTripActivationNotification({
+          tripId: trip.id,
+          tripName: trip.name
+        });
+        
+        if (notificationResult.reason === 'FCM_UNAVAILABLE') {
+          console.log('📋 Trip activated successfully (notifications saved to database, FCM unavailable)');
+        } else if (notificationResult.reason === 'FCM_ERROR') {
+          console.log('📋 Trip activated successfully (FCM notifications failed but saved to database)');
+        } else {
+          console.log(`📱 Trip activation notifications: ${notificationResult.successCount} sent, ${notificationResult.failureCount} failed`);
+        }
+      } catch (notificationError) {
+        console.error('⚠️ Notification error during trip activation:', notificationError.message);
+        console.log('📋 Trip activation continuing despite notification issues');
+      }
 
       console.log(`✅ Trip "${trip.name}" activated successfully with ${missionDistribution.totalMissions} total missions planned`);
     } catch (error) {

@@ -37,4 +37,7 @@ router.get('/album-service/:tripId', testController.testAlbumService);
 // Create test PDF
 router.post('/create-pdf', testController.createTestPDF);
 
+// Test FCM configuration
+router.get('/fcm-configuration', testController.testFCMConfiguration);
+
 module.exports = router;

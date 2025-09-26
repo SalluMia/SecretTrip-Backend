@@ -413,6 +413,11 @@ exports.sendRequestResponseNotification = async ({ userId, tripName, alias, appr
   }
 };
 
+// Helper function to check FCM availability
+const isFCMAvailable = () => {
+  return admin && admin.messaging;
+};
+
 // Send mission assignment notification
 exports.sendMissionAssignedNotification = async ({ userId, missionTitle, tripName, alias }) => {
   try {
@@ -430,14 +435,20 @@ exports.sendMissionAssignedNotification = async ({ userId, missionTitle, tripNam
       }
     });
 
+    // Check if FCM is available
+    if (!isFCMAvailable()) {
+      console.log('⚠️ FCM not available - notification saved to database only');
+      return { success: false, reason: 'FCM_NOT_AVAILABLE' };
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { fcmToken: true }
     });
 
     if (!user?.fcmToken) {
-      console.log('No FCM token found for user');
-      return;
+      console.log('⚠️ No FCM token found for user - notification saved to database only');
+      return { success: false, reason: 'NO_FCM_TOKEN' };
     }
 
     const message = {
@@ -471,17 +482,35 @@ exports.sendMissionAssignedNotification = async ({ userId, missionTitle, tripNam
     };
 
     const response = await admin.messaging().send(message);
-    console.log('Mission notification sent:', response);
-    return response;
+    console.log('✅ Mission notification sent successfully:', response);
+    return { success: true, response };
+    
   } catch (error) {
-    console.error('Error sending mission notification:', error);
-    throw error;
+    console.error('❌ Error sending mission notification:', error.message);
+    
+    // Handle specific FCM errors gracefully
+    if (error.code === 'messaging/mismatched-credential') {
+      console.error('🔧 Firebase credentials issue - check service account permissions');
+      console.error('📋 Notification saved to database, but push notification failed');
+    } else if (error.code === 'messaging/registration-token-not-registered') {
+      console.error('📱 User\'s FCM token is invalid or expired');
+    } else if (error.code === 'messaging/invalid-argument') {
+      console.error('📝 Invalid message format or parameters');
+    }
+    
+    // Don't throw error - just log and continue (notification is already saved in database)
+    return { success: false, error: error.message, code: error.code };
   }
 };
 
 // Send trip activation notification
 exports.sendTripActivationNotification = async ({ tripId, tripName }) => {
   try {
+    // Check if FCM is available
+    if (!isFCMAvailable()) {
+      console.log('⚠️ FCM not available - notifications will be saved to database only');
+    }
+
     const trip = await prisma.trip.findUnique({
       where: { id: tripId },
       include: {
@@ -518,6 +547,12 @@ exports.sendTripActivationNotification = async ({ tripId, tripName }) => {
       });
     }
 
+    // If FCM is not available, return early
+    if (!isFCMAvailable()) {
+      console.log('📋 All notifications saved to database (FCM unavailable)');
+      return { successCount: 0, failureCount: 0, reason: 'FCM_UNAVAILABLE' };
+    }
+
     const notifications = trip.members
       .filter(member => member.fcmToken)
       .map(member => {
@@ -551,12 +586,50 @@ exports.sendTripActivationNotification = async ({ tripId, tripName }) => {
       return;
     }
 
-    const response = await admin.messaging().sendAll(notifications);
-    console.log(`Trip activation notifications sent: ${response.successCount}/${notifications.length}`);
-    return response;
+    // Since each notification has personalized content (different aliases), 
+    // we need to send them individually
+    const results = [];
+    for (const notification of notifications) {
+      try {
+        const response = await admin.messaging().send(notification);
+        results.push({ success: true, response });
+      } catch (error) {
+        console.error('Failed to send notification to token:', notification.token, error.message);
+        
+        // Handle specific FCM errors gracefully
+        if (error.code === 'messaging/mismatched-credential') {
+          console.error('🔧 Firebase credentials issue - check service account permissions');
+        } else if (error.code === 'messaging/registration-token-not-registered') {
+          console.error('📱 User\'s FCM token is invalid or expired');
+        } else if (error.code === 'messaging/invalid-argument') {
+          console.error('📝 Invalid message format or parameters');
+        }
+        
+        results.push({ success: false, error: error.message, code: error.code });
+      }
+    }
+    
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+    
+    console.log(`Trip activation notifications sent: ${successCount}/${notifications.length}`);
+    return { 
+      successCount, 
+      failureCount, 
+      responses: results.map(r => ({ success: r.success }))
+    };
   } catch (error) {
     console.error('Error sending trip activation notifications:', error);
-    throw error;
+    
+    // Don't throw error - notifications are already saved in database
+    // This prevents the entire trip activation from failing due to FCM issues
+    console.error('📋 Trip activation will continue despite notification errors');
+    return { 
+      successCount: 0, 
+      failureCount: 0, 
+      error: error.message,
+      reason: 'FCM_ERROR'
+    };
   }
 };
 
@@ -577,7 +650,24 @@ exports.updateFCMToken = async ({ userId, fcmToken }) => {
 // Send bulk notifications
 exports.sendBulkNotifications = async (notifications) => {
   try {
-    const response = await admin.messaging().sendAll(notifications);
+    // Group notifications by similar content to use sendEachForMulticast efficiently
+    const tokens = notifications.map(n => n.token);
+    
+    if (tokens.length === 0) {
+      return { successCount: 0, failureCount: 0, responses: [] };
+    }
+    
+    // Use first notification as template (assuming all have similar structure)
+    const template = notifications[0];
+    
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens: tokens,
+      notification: template.notification,
+      data: template.data,
+      android: template.android,
+      apns: template.apns
+    });
+    
     console.log(`Bulk notifications sent: ${response.successCount}/${notifications.length}`);
     
     // Handle failed notifications
@@ -585,8 +675,8 @@ exports.sendBulkNotifications = async (notifications) => {
       const failedTokens = [];
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
-          failedTokens.push(notifications[idx].token);
-          console.error('Failed to send to token:', notifications[idx].token, resp.error);
+          failedTokens.push(tokens[idx]);
+          console.error('Failed to send to token:', tokens[idx], resp.error);
         }
       });
     }

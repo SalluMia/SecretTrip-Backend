@@ -416,5 +416,122 @@ exports.createTestPDF = async (req, res, next) => {
   }
 };
 
+// Test FCM configuration and permissions
+exports.testFCMConfiguration = async (req, res, next) => {
+  try {
+    console.log('🧪 Testing FCM configuration...');
+    
+    // Try to load Firebase admin
+    let admin;
+    try {
+      admin = require('../config/firebase');
+    } catch (firebaseError) {
+      return successResponse(res, {
+        success: false,
+        message: 'Firebase configuration failed to load',
+        error: firebaseError.message,
+        recommendations: [
+          'Check environment variables in .env file',
+          'Verify Firebase service account credentials',
+          'Ensure all required Firebase env vars are set'
+        ]
+      });
+    }
+
+    if (!admin) {
+      return successResponse(res, {
+        success: false,
+        message: 'Firebase not initialized',
+        recommendations: [
+          'Check environment variables',
+          'Verify service account credentials',
+          'Check Firebase project configuration'
+        ]
+      });
+    }
+
+    // Test messaging service availability
+    try {
+      const messaging = admin.messaging();
+      
+      // Try to send a test message to a dummy token (this will fail but shows if service is accessible)
+      await messaging.send({
+        token: 'dummy-token-for-testing-fcm-service-availability',
+        notification: { title: 'Test', body: 'Test' },
+        data: { test: 'true' }
+      });
+      
+    } catch (testError) {
+      if (testError.code === 'messaging/registration-token-not-registered') {
+        // This is expected - means FCM service is accessible
+        return successResponse(res, {
+          success: true,
+          message: 'FCM service is accessible and working',
+          status: 'ready',
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          recommendations: [
+            'FCM is properly configured',
+            'Service can send notifications',
+            'Ready for production use'
+          ]
+        });
+      } else if (testError.code === 'messaging/mismatched-credential') {
+        return successResponse(res, {
+          success: false,
+          message: 'FCM credentials/permissions issue',
+          error: testError.message,
+          errorCode: testError.code,
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          recommendations: [
+            'Check service account permissions in Google Cloud Console',
+            'Verify project ID matches Firebase project',
+            'Ensure Cloud Messaging API is enabled',
+            'Verify service account has "Firebase Admin SDK Administrator Service Agent" role',
+            'Check if service account has "Cloud Messaging Admin" permissions'
+          ]
+        });
+      } else if (testError.code === 'messaging/invalid-argument') {
+        return successResponse(res, {
+          success: false,
+          message: 'FCM configuration issue',
+          error: testError.message,
+          errorCode: testError.code,
+          recommendations: [
+            'Check Firebase project configuration',
+            'Verify service account key format',
+            'Ensure private key is properly formatted'
+          ]
+        });
+      } else {
+        return successResponse(res, {
+          success: false,
+          message: 'Unknown FCM error',
+          error: testError.message,
+          errorCode: testError.code,
+          recommendations: [
+            'Check Firebase documentation',
+            'Verify all environment variables',
+            'Check Google Cloud Console for project issues'
+          ]
+        });
+      }
+    }
+
+    // If we get here, something unexpected happened
+    return successResponse(res, {
+      success: false,
+      message: 'Unexpected FCM test result',
+      recommendations: [
+        'Check Firebase configuration',
+        'Review test implementation'
+      ]
+    });
+
+  } catch (error) {
+    console.error('❌ Error testing FCM configuration:', error);
+    return errorResponse(res, 500, 'FCM test failed', error.message);
+  }
+};
+
 // Functions are already exported using exports.functionName above
 // No need for additional module.exports
